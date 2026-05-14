@@ -1,0 +1,24 @@
+@using Microsoft.AspNetCore.Components.Web
+@namespace MonitoringSystem.Web.Pages
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Система моніторингу</title>
+    <base href="~/" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="css/dashboard.css" />
+    <component type="typeof(HeadOutlet)" render-mode="Server" />
+</head>
+<body>
+    @RenderBody()
+    <div id="blazor-error-ui">
+        Виникла помилка. <a href="" class="reload">Перезавантажити</a>
+        <a class="dismiss">🗙</a>
+    </div>
+    <script src="_framework/blazor.server.js"></script>
+</body>
+</html>

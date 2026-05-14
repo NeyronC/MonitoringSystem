@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="MonitoringSystem.Maui.Views.AgentPage"
+             Title="Monitoring System Agent"
+             Shell.NavBarIsVisible="False"
+             BackgroundColor="#0a0c14">
+
+    <!-- Grid: Header / Banner / Content / Footer -->
+    <Grid RowDefinitions="Auto,Auto,*,Auto" Padding="0">
+
+        <!-- ── Row 0: Header ───────────────────────────────────────────── -->
+        <Grid Grid.Row="0" BackgroundColor="#111827"
+              Padding="20,14" ColumnDefinitions="*,Auto">
+            <VerticalStackLayout Grid.Column="0" Spacing="2">
+                <Label Text="🛡️  Система моніторингу"
+                       FontSize="16" FontAttributes="Bold" TextColor="#e2e8f0"/>
+                <Label Text="{Binding UserInfo}"
+                       FontSize="12" TextColor="#6b7280"/>
+            </VerticalStackLayout>
+            <Border Grid.Column="1"
+                    StrokeShape="RoundRectangle 20" StrokeThickness="0"
+                    BackgroundColor="{Binding StatusColor}"
+                    Padding="12,5" VerticalOptions="Center">
+                <Label Text="{Binding ConnectionStatus}"
+                       TextColor="White" FontSize="11" FontAttributes="Bold"/>
+            </Border>
+        </Grid>
+
+        <!-- ── Row 1: Violation / Admin Banner ─────────────────────────── -->
+        <!-- IsVisible прив'язано до ShowViolationBanner у ViewModel        -->
+        <!-- Банер з'являється при порушенні або повідомленні від адміна    -->
+        <Grid Grid.Row="1" IsVisible="{Binding ShowViolationBanner}"
+              BackgroundColor="{Binding BannerColor}"
+              Padding="16,12" ColumnDefinitions="*,Auto">
+
+            <VerticalStackLayout Grid.Column="0" Spacing="4">
+                <!-- Заголовок порушення / повідомлення -->
+                <Label Text="{Binding BannerTitle}"
+                       FontSize="13" FontAttributes="Bold"
+                       TextColor="#fecaca" LineBreakMode="WordWrap"/>
+                <!-- Деталі (якщо є) -->
+                <Label Text="{Binding BannerDetail}"
+                       FontSize="11" TextColor="#fca5a5"
+                       LineBreakMode="WordWrap"/>
+            </VerticalStackLayout>
+
+            <!-- Кнопка закрити -->
+            <Button Grid.Column="1"
+                    Text="✕"
+                    Command="{Binding DismissBannerCommand}"
+                    BackgroundColor="Transparent"
+                    TextColor="#f87171"
+                    FontSize="18"
+                    WidthRequest="40" HeightRequest="40"
+                    Padding="0" VerticalOptions="Center"/>
+        </Grid>
+
+        <!-- ── Row 2: Main content ──────────────────────────────────────── -->
+        <ScrollView Grid.Row="2">
+            <VerticalStackLayout Padding="16" Spacing="12">
+
+                <!-- Статус-карта -->
+                <Border StrokeShape="RoundRectangle 14"
+                        StrokeThickness="1" Stroke="#1e293b"
+                        BackgroundColor="#111827" Padding="20,16">
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16">
+                        <Label Grid.Column="0" Text="🛡️"
+                               FontSize="40" VerticalOptions="Center"/>
+                        <VerticalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center">
+                            <Label Text="{Binding StatusText}"
+                                   FontSize="16" FontAttributes="Bold" TextColor="#e2e8f0"/>
+                            <Label Text="Моніторинг активний у фоновому режимі"
+                                   FontSize="11" TextColor="#4b5563"/>
+                        </VerticalStackLayout>
+                    </Grid>
+                </Border>
+
+                <!-- Лічильники: Подій / Порушень / Циклів -->
+                <Grid ColumnDefinitions="*,*,*" ColumnSpacing="10">
+                    <Border Grid.Column="0"
+                            StrokeShape="RoundRectangle 12" StrokeThickness="1"
+                            Stroke="#1e293b" BackgroundColor="#111827" Padding="14,14">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="{Binding LogsSentCount}" FontSize="26" FontAttributes="Bold"
+                                   TextColor="#7F77DD" HorizontalTextAlignment="Center"/>
+                            <Label Text="Подій" FontSize="10" TextColor="#6b7280"
+                                   HorizontalTextAlignment="Center"/>
+                        </VerticalStackLayout>
+                    </Border>
+                    <Border Grid.Column="1"
+                            StrokeShape="RoundRectangle 12" StrokeThickness="1"
+                            Stroke="#1e293b" BackgroundColor="#111827" Padding="14,14">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="{Binding ViolationsCount}" FontSize="26" FontAttributes="Bold"
+                                   TextColor="#ef4444" HorizontalTextAlignment="Center"/>
+                            <Label Text="Порушень" FontSize="10" TextColor="#6b7280"
+                                   HorizontalTextAlignment="Center"/>
+                        </VerticalStackLayout>
+                    </Border>
+                    <Border Grid.Column="2"
+                            StrokeShape="RoundRectangle 12" StrokeThickness="1"
+                            Stroke="#1e293b" BackgroundColor="#111827" Padding="14,14">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="{Binding CycleCount}" FontSize="26" FontAttributes="Bold"
+                                   TextColor="#22c55e" HorizontalTextAlignment="Center"/>
+                            <Label Text="Циклів" FontSize="10" TextColor="#6b7280"
+                                   HorizontalTextAlignment="Center"/>
+                        </VerticalStackLayout>
+                    </Border>
+                </Grid>
+
+                <!-- Блок останнього порушення (завжди видимий якщо є) -->
+                <Border IsVisible="{Binding HasLastViolation}"
+                        StrokeShape="RoundRectangle 12"
+                        StrokeThickness="1" Stroke="#7f1d1d"
+                        BackgroundColor="#1c0a0a" Padding="16,12">
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="⚠️  Останнє порушення"
+                               FontSize="11" TextColor="#fca5a5" FontAttributes="Bold"/>
+                        <Label Text="{Binding LastViolationText}"
+                               FontSize="12" TextColor="#fecaca" LineBreakMode="WordWrap"/>
+                        <Label Text="{Binding LastViolationTime}"
+                               FontSize="10" TextColor="#9ca3af"/>
+                    </VerticalStackLayout>
+                </Border>
+
+                <!-- Останнє повідомлення від адміна -->
+                <Border IsVisible="{Binding HasAdminMessage}"
+                        StrokeShape="RoundRectangle 12"
+                        StrokeThickness="1" Stroke="#312e81"
+                        BackgroundColor="#1e1b4b" Padding="16,12">
+                    <VerticalStackLayout Spacing="6">
+                        <Label Text="📢 Повідомлення від адміністратора"
+                               FontSize="11" TextColor="#a5b4fc" FontAttributes="Bold"/>
+                        <Label Text="{Binding LastAdminMessageTitle}"
+                               FontSize="13" TextColor="#e0e7ff" FontAttributes="Bold"/>
+                        <Label Text="{Binding LastAdminMessage}"
+                               FontSize="12" TextColor="#c7d2fe"/>
+                        <Button Text="Закрити"
+                                Command="{Binding DismissAdminMessageCommand}"
+                                BackgroundColor="Transparent" TextColor="#818cf8"
+                                FontSize="11" HorizontalOptions="Start" Padding="0"/>
+                    </VerticalStackLayout>
+                </Border>
+
+                <!-- Лог останніх подій -->
+                <Border StrokeShape="RoundRectangle 12"
+                        StrokeThickness="1" Stroke="#1e293b"
+                        BackgroundColor="#111827" Padding="0">
+                    <VerticalStackLayout>
+                        <Label Text="📋  Останні події"
+                               FontSize="12" FontAttributes="Bold"
+                               TextColor="#94a3b8" Padding="16,12,16,8"/>
+                        <CollectionView ItemsSource="{Binding RecentEvents}" HeightRequest="200">
+                            <CollectionView.EmptyView>
+                                <Label Text="Очікування подій..."
+                                       TextColor="#374151" FontSize="12"
+                                       HorizontalTextAlignment="Center" Margin="0,20"/>
+                            </CollectionView.EmptyView>
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Padding="16,6" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                        <Label Grid.Column="0" Text="{Binding Icon}"
+                                               FontSize="13" VerticalOptions="Center"/>
+                                        <Label Grid.Column="1" Text="{Binding Text}"
+                                               FontSize="11" TextColor="#9ca3af"
+                                               LineBreakMode="TailTruncation" VerticalOptions="Center"/>
+                                        <Label Grid.Column="2" Text="{Binding Time}"
+                                               FontSize="10" TextColor="#374151" VerticalOptions="Center"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </VerticalStackLayout>
+                </Border>
+
+            </VerticalStackLayout>
+        </ScrollView>
+
+        <!-- ── Row 3: Footer ───────────────────────────────────────────── -->
+        <Grid Grid.Row="3" BackgroundColor="#111827"
+              Padding="12,10" ColumnDefinitions="*,Auto,Auto">
+            <Label Grid.Column="0"
+                   Text="{Binding NextCycleText}"
+                   FontSize="11" TextColor="#374151" VerticalOptions="Center"/>
+            <Button Grid.Column="1" Text="🔍 Деталі"
+                    Command="{Binding OpenDetailsCommand}"
+                    BackgroundColor="#1e293b" TextColor="#7F77DD"
+                    FontSize="12" BorderColor="#2d3d55" BorderWidth="1"
+                    CornerRadius="8" HeightRequest="34" Padding="12,0" Margin="0,0,8,0"/>
+            <Button Grid.Column="2" Text="Вийти"
+                    Command="{Binding LogoutCommand}"
+                    BackgroundColor="Transparent" TextColor="#6b7280"
+                    FontSize="12" BorderColor="#1f2937" BorderWidth="1"
+                    CornerRadius="8" HeightRequest="34" Padding="12,0"/>
+        </Grid>
+
+    </Grid>
+</ContentPage>

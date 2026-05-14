@@ -1,0 +1,165 @@
+@page "/users"
+@using System.Net.Http.Json
+@inject IHttpClientFactory ClientFactory
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject NavigationManager Nav
+
+<PageTitle>Користувачі — Моніторинг</PageTitle>
+
+@if (!_authorized) { <div style="display:none"></div> }
+else
+{
+<div class="page-header">
+    <h1 class="page-title">Користувачі</h1>
+    <button class="btn-primary" @onclick="() => showForm = !showForm">
+        @(showForm ? "Сховати" : "+ Додати користувача")
+    </button>
+</div>
+
+@if (showForm)
+{
+    <div class="form-card">
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Логін</label>
+                <input @bind="newUser.Username" placeholder="john.doe"/>
+            </div>
+            <div class="form-group">
+                <label>Пароль</label>
+                <input type="password" @bind="newUser.Password" placeholder="Мінімум 6 символів"/>
+            </div>
+            <div class="form-group">
+                <label>Відділ</label>
+                <input @bind="newUser.Department" placeholder="IT, HR, Sales..."/>
+            </div>
+            <div class="form-group">
+                <label>Роль</label>
+                <select @bind="newUser.Role">
+                    <option value="User">User — звичайний співробітник</option>
+                    <option value="Admin">Admin — адміністратор</option>
+                </select>
+            </div>
+        </div>
+        @if (!string.IsNullOrEmpty(formError))
+        { <div style="color:var(--red);font-size:13px;margin-bottom:10px;">⚠️ @formError</div> }
+        <div class="form-actions">
+            <button class="btn-primary" @onclick="CreateUser"
+                    disabled="@(string.IsNullOrWhiteSpace(newUser.Username) || newUser.Password.Length < 6)">
+                Створити користувача
+            </button>
+            <button class="btn-ghost" @onclick="CancelForm">Скасувати</button>
+        </div>
+    </div>
+}
+
+<div class="section">
+    @if (isLoading) { <div class="loading">Завантаження...</div> }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr><th>Статус</th><th>Логін</th><th>Відділ</th><th>Роль</th><th>Зареєстровано</th><th>Дії</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var u in users)
+                {
+                    <tr>
+                        <td><span class="status-dot @(u.IsOnline?"online":"offline")"></span> @(u.IsOnline?"Онлайн":"Офлайн")</td>
+                        <td><strong>@u.Username</strong></td>
+                        <td>@(u.Department ?? "—")</td>
+                        <td><span class="badge @(u.Role=="Admin"?"badge-admin":"badge-user")">@u.Role</span></td>
+                        <td class="text-muted">@u.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                        <td style="display:flex;gap:4px;">
+                            <a href="/user-details/@u.Id" class="btn-ghost"
+                               style="padding:3px 10px;font-size:12px;text-decoration:none;">✏️ Деталі</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+}
+
+@code {
+    private List<UserDto> users = new();
+    private bool showForm, isLoading, _authorized, _rendered;
+    private string formError = "";
+    private UserFormDto newUser = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _rendered) return;
+        _rendered = true;
+        try
+        {
+            var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+            if (string.IsNullOrEmpty(token)) { Nav.NavigateTo("/login", forceLoad: false); return; }
+            _authorized = true;
+            StateHasChanged();
+            await LoadUsers();
+            StateHasChanged();
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (Exception) { }
+    }
+
+    private void CancelForm() { showForm = false; formError = ""; }
+
+    private async Task LoadUsers()
+    {
+        isLoading = true;
+        try
+        {
+            var http = await GetHttp();
+            users = await http.GetFromJsonAsync<List<UserDto>>("api/users") ?? new();
+        }
+        finally { isLoading = false; }
+    }
+
+    private async Task CreateUser()
+    {
+        formError = "";
+        var http = await GetHttp();
+        var resp = await http.PostAsJsonAsync("api/users", new
+        {
+            newUser.Username, newUser.Password, newUser.Role,
+            Department = newUser.Department ?? ""
+        });
+        if (resp.IsSuccessStatusCode)
+        {
+            newUser = new(); showForm = false;
+            await LoadUsers();
+        }
+        else
+        {
+            var err = await resp.Content.ReadFromJsonAsync<Dictionary<string,string>>();
+            formError = err?.GetValueOrDefault("message") ?? "Помилка створення";
+        }
+        StateHasChanged();
+    }
+
+    private async Task<HttpClient> GetHttp()
+    {
+        var http  = ClientFactory.CreateClient("API");
+        var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (!string.IsNullOrEmpty(token))
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return http;
+    }
+
+    class UserDto
+    {
+        public string Id { get; set; } = ""; public string Username { get; set; } = "";
+        public string Role { get; set; } = ""; public string? Department { get; set; }
+        public bool IsOnline { get; set; }    public DateTime CreatedAt { get; set; }
+    }
+    class UserFormDto
+    {
+        public string Username   { get; set; } = "";
+        public string Password   { get; set; } = "";
+        public string Role       { get; set; } = "User";
+        public string? Department { get; set; }
+    }
+}

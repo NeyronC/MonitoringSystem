@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="MonitoringSystem.Maui.Views.DevicesPage"
+             Title="{Binding Title}">
+
+    <RefreshView Command="{Binding RefreshCommand}"
+                 IsRefreshing="{Binding IsBusy}">
+        <CollectionView ItemsSource="{Binding Devices}"
+                        Margin="12">
+            <CollectionView.EmptyView>
+                <Label Text="Пристроїв не знайдено"
+                       HorizontalTextAlignment="Center"
+                       TextColor="Gray" Margin="0,40"/>
+            </CollectionView.EmptyView>
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Border Margin="0,5" Padding="14"
+                            StrokeShape="RoundRectangle 12"
+                            StrokeThickness="1"
+                            Stroke="{AppThemeBinding Light=#D3F5E8, Dark=#085041}">
+                        <Grid ColumnDefinitions="40,*,Auto" ColumnSpacing="10">
+
+                            <!-- Іконка платформи -->
+                            <Label Grid.Column="0"
+                                   Text="{Binding PlatformIcon}"
+                                   FontSize="28" VerticalOptions="Center"
+                                   HorizontalOptions="Center"/>
+
+                            <VerticalStackLayout Grid.Column="1" Spacing="3">
+
+                                <!-- Режим перегляду -->
+                                <Label Text="{Binding DisplayName}"
+                                       FontSize="16" FontAttributes="Bold"
+                                       IsVisible="{Binding IsNotEditing}"/>
+
+                                <!-- Режим редагування -->
+                                <Border StrokeShape="RoundRectangle 8"
+                                        IsVisible="{Binding IsEditing}"
+                                        StrokeThickness="1.5"
+                                        Stroke="#7F77DD">
+                                    <Entry Text="{Binding EditName}"
+                                           FontSize="15" FontAttributes="Bold"
+                                           ReturnCommand="{Binding SaveNameCommand}"
+                                           Margin="8,0" HeightRequest="40"/>
+                                </Border>
+
+                                <HorizontalStackLayout Spacing="10">
+                                    <Label Text="{Binding Platform}"
+                                           FontSize="12" TextColor="#1D9E75"/>
+                                    <Label Text="{Binding OsVersion}"
+                                           FontSize="12" TextColor="Gray"/>
+                                </HorizontalStackLayout>
+                                <Label Text="{Binding LastSeen,
+                                           StringFormat='Остання активність: {0:dd.MM.yy HH:mm}'}"
+                                       FontSize="11" TextColor="Gray"/>
+                            </VerticalStackLayout>
+
+                            <!-- Кнопки -->
+                            <VerticalStackLayout Grid.Column="2" Spacing="6"
+                                                 VerticalOptions="Center">
+                                <!-- Кнопка редагувати -->
+                                <Button Text="✏"
+                                        Command="{Binding StartEditCommand}"
+                                        IsVisible="{Binding IsNotEditing}"
+                                        BackgroundColor="#EEEDFE" TextColor="#534AB7"
+                                        CornerRadius="8" WidthRequest="40" HeightRequest="36"
+                                        Padding="0" FontSize="16"/>
+                                <!-- Зберегти -->
+                                <Button Text="✓"
+                                        Command="{Binding SaveNameCommand}"
+                                        IsVisible="{Binding IsEditing}"
+                                        BackgroundColor="#E1F5EE" TextColor="#0F6E56"
+                                        CornerRadius="8" WidthRequest="40" HeightRequest="36"
+                                        Padding="0" FontSize="16"/>
+                                <!-- Скасувати -->
+                                <Button Text="✕"
+                                        Command="{Binding CancelEditCommand}"
+                                        IsVisible="{Binding IsEditing}"
+                                        BackgroundColor="#FCEBEB" TextColor="#A32D2D"
+                                        CornerRadius="8" WidthRequest="40" HeightRequest="36"
+                                        Padding="0" FontSize="14"/>
+                            </VerticalStackLayout>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+    </RefreshView>
+</ContentPage>

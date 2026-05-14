@@ -1,0 +1,220 @@
+@page "/rules"
+@using System.Net.Http.Json
+@inject IHttpClientFactory ClientFactory
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject NavigationManager Nav
+
+@if (!_authorized)
+{
+    <div style="display:none"></div>
+}
+else
+{
+<PageTitle>Правила — Моніторинг</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Правила моніторингу</h1>
+    <button class="btn-primary" @onclick="() => showForm = !showForm">
+        @(showForm ? "Сховати" : "+ Нове правило")
+    </button>
+</div>
+
+@if (showForm)
+{
+    <div class="form-card">
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Назва правила</label>
+                <input @bind="newRule.Name" placeholder="Напр. Заблокований Instagram"/>
+            </div>
+            <div class="form-group">
+                <label>Тип правила</label>
+                <select @bind="newRule.RuleType">
+                    <option value="BlockedDomain">BlockedDomain — заблокований сайт</option>
+                    <option value="BlockedKeyword">BlockedKeyword — ключове слово</option>
+                    <option value="CustomEvent">CustomEvent — кастомна подія</option>
+                    <option value="OffHoursAccess">OffHoursAccess — вхід поза робочим часом (08-18, Пн-Пт)</option>
+                    <option value="BlockedProcess">BlockedProcess — заблокована програма</option>
+                    <option value="SessionTimeLimit">SessionTimeLimit — ліміт сесії (хв)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Значення</label>
+                <input @bind="newRule.Value" placeholder="instagram.com або ExportData або 480"/>
+            </div>
+            <div class="form-group">
+                <label>Severity</label>
+                <select @bind="newRule.Severity">
+                    <option value="Info">Info</option>
+                    <option value="Warning">Warning</option>
+                    <option value="Critical">Critical</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Дія при порушенні</label>
+                <select @bind="newRule.Action">
+                    <option value="Log">Log — тільки записати</option>
+                    <option value="Alert">Alert — сповіщення в дашборд</option>
+                    <option value="Notify">Notify — Alert + сповіщення</option>
+                    <option value="Block">Block — заблокувати дію</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Опис (необов'язково)</label>
+                <input @bind="newRule.Description" placeholder="Коментар до правила"/>
+            </div>
+            <div class="form-group" style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+                <input type="checkbox" id="notif" @bind="newRule.ShowDesktopNotification"
+                       style="width:16px;height:16px;accent-color:#7F77DD;cursor:pointer;"/>
+                <label for="notif" style="cursor:pointer;margin:0;text-transform:none;font-size:0.875rem;color:#e2e8f0;">
+                    🔔 Показувати банер на пристрої юзера при порушенні
+                </label>
+            </div>
+            <div class="form-group">
+                <label>Автоматична реакція</label>
+                <select @bind="newRule.AutoResponse">
+                    <option value="None">Немає — тільки зафіксувати</option>
+                    <option value="NotifyUser">Авто-повідомлення юзеру</option>
+                    <option value="NotifyAdmin">Сповіщення адміну (SignalR)</option>
+                    <option value="Both">Обом — і юзеру і адміну</option>
+                </select>
+            </div>
+            @if (newRule.AutoResponse is "NotifyUser" or "Both")
+            {
+                <div class="form-group">
+                    <label>Текст авто-повідомлення юзеру</label>
+                    <input @bind="newRule.AutoResponseMessage"
+                           placeholder="Залиш порожнім для стандартного тексту"/>
+                </div>
+            }
+        </div>
+        <div class="form-actions">
+            <button class="btn-primary" @onclick="CreateRule"
+                    disabled="@(string.IsNullOrWhiteSpace(newRule.Name) || string.IsNullOrWhiteSpace(newRule.Value))">
+                Зберегти правило
+            </button>
+            <button class="btn-ghost" @onclick="() => showForm = false">Скасувати</button>
+        </div>
+    </div>
+}
+
+<div class="section">
+    @if (isLoading) { <div class="loading">Завантаження...</div> }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Назва</th><th>Тип</th><th>Значення</th>
+                    <th>Severity</th><th>Дія</th><th>Авто-реакція</th><th>Статус</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in rules)
+                {
+                    <tr>
+                        <td><strong>@r.Name</strong>
+                            @if (!string.IsNullOrEmpty(r.Description))
+                            { <div class="row-subtitle">@r.Description</div> }
+                        </td>
+                        <td><span class="badge badge-type">@r.RuleType</span></td>
+                        <td><code class="code-val">@r.Value</code></td>
+                        <td><span class="badge badge-@r.Severity.ToLower()">@r.Severity</span></td>
+                        <td><span class="badge badge-action">@r.Action</span></td>
+                        <td><span class="badge @(r.AutoResponse != "None" ? "badge-warning" : "badge-inactive")" style="font-size:10px;">@(r.AutoResponse == "None" ? "—" : r.AutoResponse)</span></td>
+                        <td>
+                            <span class="badge @(r.IsActive ? "badge-active" : "badge-inactive")">
+                                @(r.IsActive ? "Активне" : "Вимкнено")
+                            </span>
+                        </td>
+                        <td class="text-muted">@r.CreatedBy</td>
+                        <td><button class="btn-danger-sm" @onclick="() => DeleteRule(r.Id)">✕</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+}
+
+@code {
+    private List<RuleDto> rules = new();
+    private bool showForm;
+    private bool isLoading;
+    private bool _rendered;
+    private bool _authorized;
+    private RuleFormDto newRule = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _rendered) return;
+        _rendered = true;
+        try
+        {
+                var _authToken = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (string.IsNullOrEmpty(_authToken)) { Nav.NavigateTo("/login", forceLoad: false); return; }
+        _authorized = true;
+        StateHasChanged();
+        await LoadRules();
+            StateHasChanged();
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (Exception) { }
+    }
+
+    private async Task LoadRules()
+    {
+        isLoading = true;
+        try
+        {
+            var http = await GetHttpAsync();
+            var resp = await http.GetAsync("api/rules");
+            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            { Nav.NavigateTo("/login", forceLoad: true); return; }
+            rules = await resp.Content.ReadFromJsonAsync<List<RuleDto>>() ?? new();
+        }
+        finally { isLoading = false; }
+    }
+
+    private async Task CreateRule()
+    {
+        var http = await GetHttpAsync();
+        var resp = await http.PostAsJsonAsync("api/rules", newRule);
+        if (resp.IsSuccessStatusCode) { newRule = new(); showForm = false; await LoadRules(); }
+    }
+
+    private async Task DeleteRule(string id)
+    {
+        var http = await GetHttpAsync();
+        await http.DeleteAsync($"api/rules/{id}");
+        rules.RemoveAll(r => r.Id == id);
+    }
+
+    private async Task<HttpClient> GetHttpAsync()
+    {
+        var http  = ClientFactory.CreateClient("API");
+        var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (!string.IsNullOrEmpty(token))
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return http;
+    }
+
+    class RuleDto
+    {
+        public string Id { get; set; } = "";  public string Name { get; set; } = "";
+        public string RuleType { get; set; } = ""; public string Value { get; set; } = "";
+        public string Severity { get; set; } = ""; public string Action { get; set; } = "";
+        public bool IsActive { get; set; }    public string CreatedBy { get; set; } = "";
+        public string? Description { get; set; }  public string AutoResponse { get; set; } = "None";
+    }
+    class RuleFormDto
+    {
+        public string Name { get; set; } = "";        public string RuleType { get; set; } = "BlockedDomain";
+        public string Value { get; set; } = "";       public string Severity { get; set; } = "Warning";
+        public string Action { get; set; } = "Alert"; public bool IsActive { get; set; } = true;
+        public string? Description { get; set; }      public bool ShowDesktopNotification { get; set; } = true;
+        public string AutoResponse { get; set; } = "None";  public string AutoResponseMessage { get; set; } = "";
+    }
+}

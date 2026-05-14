@@ -1,0 +1,401 @@
+@page "/stats"
+@using System.Net.Http.Json
+@inject IHttpClientFactory ClientFactory
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject NavigationManager Nav
+
+<PageTitle>Статистика — Моніторинг</PageTitle>
+
+@if (!_authorized) { <div style="display:none"></div> }
+else
+{
+<div class="page-header">
+    <h1 class="page-title">Статистика та аналітика</h1>
+    <button class="btn-ghost" @onclick="LoadAll">↻ Оновити</button>
+</div>
+
+@if (isLoading)
+{
+    <div class="loading">Завантаження статистики...</div>
+}
+else
+{
+<!-- Рядок 1: Топ юзерів + Severity breakdown -->
+<div class="charts-grid">
+
+    <!-- Топ юзерів за активністю -->
+    <div class="chart-card">
+        <div class="chart-title">🏆 Топ юзерів за кількістю дій</div>
+        <div class="bar-chart">
+            @foreach (var u in topUsers)
+            {
+                var pct = topUsers.First().Actions > 0
+                    ? (int)(u.Actions * 100.0 / topUsers.First().Actions)
+                    : 0;
+                var color = u.Actions == topUsers.First().Actions ? "#6366f1" : "#3b82f6";
+                <div class="bar-row">
+                    <span class="bar-label" title="@u.Username">@u.Username</span>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width:@(pct)%;background:@color;">
+                            @if (pct > 15) { <span>@u.Actions</span> }
+                        </div>
+                    </div>
+                    <span class="bar-value">@u.Actions</span>
+                </div>
+            }
+            @if (!topUsers.Any())
+            { <div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">Немає даних</div> }
+        </div>
+    </div>
+
+    <!-- Порушення по severity -->
+    <div class="chart-card">
+        <div class="chart-title">⚡ Порушення по рівню серйозності</div>
+        <div class="bar-chart">
+            @{ var maxSev = new[] { criticalCount, warningCount, infoCount }.Max(); }
+            <div class="bar-row">
+                <span class="bar-label">Critical</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width:@(maxSev > 0 ? criticalCount * 100 / maxSev : 0)%;background:#ef4444;">
+                        @if (maxSev > 0 && criticalCount * 100 / maxSev > 15) { <span>@criticalCount</span> }
+                    </div>
+                </div>
+                <span class="bar-value">@criticalCount</span>
+            </div>
+            <div class="bar-row">
+                <span class="bar-label">Warning</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width:@(maxSev > 0 ? warningCount * 100 / maxSev : 0)%;background:#f59e0b;">
+                        @if (maxSev > 0 && warningCount * 100 / maxSev > 15) { <span>@warningCount</span> }
+                    </div>
+                </div>
+                <span class="bar-value">@warningCount</span>
+            </div>
+            <div class="bar-row">
+                <span class="bar-label">Info</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width:@(maxSev > 0 ? infoCount * 100 / maxSev : 0)%;background:#3b82f6;">
+                        @if (maxSev > 0 && infoCount * 100 / maxSev > 15) { <span>@infoCount</span> }
+                    </div>
+                </div>
+                <span class="bar-value">@infoCount</span>
+            </div>
+        </div>
+
+        <div style="margin-top:1.25rem;">
+            <div class="chart-title">📊 Загальна статистика порушень</div>
+            <div class="stat-row">
+                <span class="stat-row-label"><span class="stat-row-dot" style="background:#ef4444;"></span>Всього порушень</span>
+                <span class="stat-row-val">@totalViolations</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-row-label"><span class="stat-row-dot" style="background:#22c55e;"></span>Підтверджено</span>
+                <span class="stat-row-val">@ackedViolations</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-row-label"><span class="stat-row-dot" style="background:#f59e0b;"></span>Очікують уваги</span>
+                <span class="stat-row-val">@(totalViolations - ackedViolations)</span>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Рядок 2: Топ правил + Активність по типах -->
+<div class="charts-grid">
+
+    <!-- Найчастіше спрацьовані правила -->
+    <div class="chart-card">
+        <div class="chart-title">🎯 Топ правил, що спрацьовують</div>
+        <div class="bar-chart">
+            @{ var maxRule = topRules.FirstOrDefault()?.Count ?? 1; }
+            @foreach (var r in topRules)
+            {
+                var pct = (int)(r.Count * 100.0 / maxRule);
+                <div class="bar-row">
+                    <span class="bar-label" title="@r.RuleName">@(r.RuleName.Length > 14 ? r.RuleName[..14]+"…" : r.RuleName)</span>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width:@(pct)%;background:#8b5cf6;">
+                            @if (pct > 15) { <span>@r.Count</span> }
+                        </div>
+                    </div>
+                    <span class="bar-value">@r.Count</span>
+                </div>
+            }
+            @if (!topRules.Any())
+            { <div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">Немає порушень</div> }
+        </div>
+    </div>
+
+    <!-- Активність по типах подій -->
+    <div class="chart-card">
+        <div class="chart-title">📋 Активність по типах подій</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            @foreach (var a in actionStats)
+            {
+                var icon = a.Action switch {
+                    "Login"             => "🔑",
+                    "Logout"            => "🚪",
+                    "WebNavigation"     => "🌍",
+                    "ProcessStarted"    => "⚙️",
+                    "NetworkConnection" => "🌐",
+                    _                   => "📝"
+                };
+                <div class="stat-row">
+                    <span class="stat-row-label">@icon @a.Action</span>
+                    <span class="stat-row-val">@a.Count</span>
+                </div>
+            }
+            @if (!actionStats.Any())
+            { <div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">Немає даних</div> }
+        </div>
+    </div>
+
+</div>
+
+<!-- Рядок 3: Активні пристрої + Онлайн статус -->
+<div class="charts-grid">
+
+    <!-- Пристрої по платформах -->
+    <div class="chart-card">
+        <div class="chart-title">💻 Пристрої по платформах</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            @foreach (var p in platformStats)
+            {
+                var icon = p.Platform switch {
+                    "Windows" => "🖥️",
+                    "Linux"   => "🐧",
+                    "Android" => "📱",
+                    _         => "💻"
+                };
+                <div class="stat-row">
+                    <span class="stat-row-label">@icon @p.Platform</span>
+                    <span class="stat-row-val">@p.Count</span>
+                </div>
+            }
+            @if (!platformStats.Any())
+            { <div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">Немає пристроїв</div> }
+        </div>
+    </div>
+
+    <!-- Онлайн/Офлайн юзери -->
+    <div class="chart-card">
+        <div class="chart-title">👥 Стан користувачів</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            <div class="stat-row">
+                <span class="stat-row-label"><span class="stat-row-dot" style="background:#22c55e;box-shadow:0 0 6px #22c55e;"></span>Онлайн зараз</span>
+                <span class="stat-row-val" style="color:#22c55e;">@onlineUsers</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-row-label"><span class="stat-row-dot" style="background:#4b5563;"></span>Офлайн</span>
+                <span class="stat-row-val">@(totalUsers - onlineUsers)</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-row-label"><span class="stat-row-dot" style="background:#8b5cf6;"></span>Адміністраторів</span>
+                <span class="stat-row-val">@adminCount</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-row-label"><span class="stat-row-dot" style="background:#3b82f6;"></span>Звичайних юзерів</span>
+                <span class="stat-row-val">@(totalUsers - adminCount)</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-row-label"><span class="stat-row-dot" style="background:#f59e0b;"></span>Активних правил</span>
+                <span class="stat-row-val">@activeRules</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-row-label"><span class="stat-row-dot" style="background:#ef4444;"></span>Всього пристроїв</span>
+                <span class="stat-row-val">@totalDevices</span>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Рядок 4: Останні порушення timeline -->
+<div class="chart-card-full">
+    <div class="chart-title">🕐 Останні порушення — хронологія</div>
+    <div class="timeline">
+        @foreach (var v in recentViolations)
+        {
+            var dotColor = v.Severity switch {
+                "Critical" => "#ef4444",
+                "Warning"  => "#f59e0b",
+                _          => "#3b82f6"
+            };
+            <div class="timeline-item">
+                <div class="timeline-dot" style="background:@dotColor;box-shadow:0 0 6px @dotColor;margin-top:5px;"></div>
+                <div class="timeline-content">
+                    <div class="timeline-title">
+                        <strong>@v.Username</strong> — @v.RuleName
+                        <span class="badge badge-@v.Severity.ToLower()" style="margin-left:6px;">@v.Severity</span>
+                        @if (v.IsAcknowledged)
+                        { <span class="badge badge-active" style="margin-left:4px;">✓</span> }
+                    </div>
+                    <div class="timeline-sub">@v.Details • @v.OccurredAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</div>
+                </div>
+            </div>
+        }
+        @if (!recentViolations.Any())
+        { <div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">Порушень ще не зафіксовано</div> }
+    </div>
+</div>
+
+}
+}
+
+@code {
+    private bool _authorized, _rendered, isLoading;
+
+    // Топ юзери
+    private List<UserStat>      topUsers      = new();
+    private List<RuleStat>      topRules      = new();
+    private List<ActionStat>    actionStats   = new();
+    private List<PlatformStat>  platformStats = new();
+    private List<ViolationItem> recentViolations = new();
+
+    private int totalViolations, ackedViolations;
+    private int criticalCount, warningCount, infoCount;
+    private int onlineUsers, totalUsers, adminCount;
+    private int activeRules, totalDevices;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _rendered) return;
+        _rendered = true;
+        try
+        {
+                var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (string.IsNullOrEmpty(token)) { Nav.NavigateTo("/login", forceLoad: false); return; }
+        _authorized = true;
+        StateHasChanged();
+        await LoadAll();
+            StateHasChanged();
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (Exception) { }
+    }
+
+    private async Task LoadAll()
+    {
+        isLoading = true;
+        StateHasChanged();
+        try
+        {
+            var http = await GetHttpAsync();
+
+            // Users
+            var uResp = await http.GetAsync("api/activity/users");
+            if (uResp.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                uResp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            { Nav.NavigateTo("/login", forceLoad: true); return; }
+            var users = await uResp.Content.ReadFromJsonAsync<List<UserData>>() ?? new();
+            totalUsers  = users.Count;
+            onlineUsers = users.Count(u => u.IsOnline);
+            adminCount  = users.Count(u => u.Role == "Admin");
+            topUsers = users
+                .OrderByDescending(u => u.TotalActions)
+                .Take(7)
+                .Select(u => new UserStat(u.Username, (int)u.TotalActions))
+                .ToList();
+            actionStats = users
+                .SelectMany(u => new[] { new { Action = "Login", Count = 1 } })
+                .Take(0).Select(x => new ActionStat(x.Action, x.Count)).ToList();
+
+            // Logs for action stats
+            var lResp = await http.GetAsync("api/activity/logs?page=1&pageSize=500");
+            if (lResp.IsSuccessStatusCode)
+            {
+                var logs = await lResp.Content.ReadFromJsonAsync<List<LogData>>() ?? new();
+                actionStats = logs
+                    .GroupBy(l => l.Action)
+                    .OrderByDescending(g => g.Count())
+                    .Take(6)
+                    .Select(g => new ActionStat(g.Key, g.Count()))
+                    .ToList();
+            }
+
+            // Violations
+            var vResp = await http.GetAsync("api/rules/violations?pageSize=200");
+            if (vResp.IsSuccessStatusCode)
+            {
+                var viols = await vResp.Content.ReadFromJsonAsync<List<ViolationData>>() ?? new();
+                totalViolations = viols.Count;
+                ackedViolations = viols.Count(v => v.IsAcknowledged);
+                criticalCount   = viols.Count(v => v.Severity == "Critical");
+                warningCount    = viols.Count(v => v.Severity == "Warning");
+                infoCount       = viols.Count(v => v.Severity == "Info");
+                topRules = viols
+                    .GroupBy(v => v.RuleName)
+                    .OrderByDescending(g => g.Count())
+                    .Take(6)
+                    .Select(g => new RuleStat(g.Key, g.Count()))
+                    .ToList();
+                recentViolations = viols.Take(10).Select(v => new ViolationItem(
+                    v.Username, v.RuleName, v.Severity, v.Details,
+                    v.OccurredAt, v.IsAcknowledged)).ToList();
+            }
+
+            // Rules
+            var rResp = await http.GetAsync("api/rules");
+            if (rResp.IsSuccessStatusCode)
+            {
+                var rules = await rResp.Content.ReadFromJsonAsync<List<RuleData>>() ?? new();
+                activeRules = rules.Count(r => r.IsActive);
+            }
+
+            // Devices
+            var dResp = await http.GetAsync("api/devices/all");
+            if (dResp.IsSuccessStatusCode)
+            {
+                var devs = await dResp.Content.ReadFromJsonAsync<List<DeviceData>>() ?? new();
+                totalDevices  = devs.Count;
+                platformStats = devs
+                    .GroupBy(d => d.Platform)
+                    .OrderByDescending(g => g.Count())
+                    .Select(g => new PlatformStat(g.Key, g.Count()))
+                    .ToList();
+            }
+        }
+        catch { }
+        finally { isLoading = false; }
+    }
+
+    private async Task<HttpClient> GetHttpAsync()
+    {
+        var http  = ClientFactory.CreateClient("API");
+        var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (!string.IsNullOrEmpty(token))
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return http;
+    }
+
+    // ── Local DTOs ────────────────────────────────────────────────────────
+    record UserStat(string Username, int Actions);
+    record RuleStat(string RuleName, int Count);
+    record ActionStat(string Action, int Count);
+    record PlatformStat(string Platform, int Count);
+    record ViolationItem(string Username, string RuleName, string Severity,
+        string Details, DateTime OccurredAt, bool IsAcknowledged);
+
+    class UserData
+    {
+        public string Id { get; set; } = "";
+        public string Username { get; set; } = "";
+        public string Role { get; set; } = "";
+        public bool IsOnline { get; set; }
+        public long TotalActions { get; set; }
+    }
+    class LogData { public string Action { get; set; } = ""; }
+    class ViolationData
+    {
+        public string RuleName { get; set; } = "";
+        public string Severity { get; set; } = "";
+        public string Details  { get; set; } = "";
+        public string Username { get; set; } = "";
+        public DateTime OccurredAt { get; set; }
+        public bool IsAcknowledged { get; set; }
+    }
+    class RuleData { public bool IsActive { get; set; } }
+    class DeviceData { public string Platform { get; set; } = ""; }
+}

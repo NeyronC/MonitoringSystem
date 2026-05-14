@@ -1,0 +1,316 @@
+@page "/user-details/{UserId}"
+@using System.Net.Http.Json
+@inject IHttpClientFactory ClientFactory
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject NavigationManager Nav
+
+<PageTitle>Деталі юзера — Моніторинг</PageTitle>
+
+@if (!_authorized) { <div style="display:none"></div> }
+else if (isLoading) { <div class="loading">Завантаження...</div> }
+else if (user == null) { <div style="padding:2rem;color:var(--text-muted);">Юзера не знайдено</div> }
+else
+{
+<div class="page-header">
+    <div style="display:flex;align-items:center;gap:12px;">
+        <a href="/" style="color:var(--text-muted);text-decoration:none;font-size:13px;">← Dashboard</a>
+        <h1 class="page-title">@user.Username</h1>
+        <span class="badge @(user.Role == "Admin" ? "badge-admin" : "badge-user")">@user.Role</span>
+        <span class="status-dot @(user.IsOnline ? "online" : "offline")"></span>
+        <span style="font-size:12px;color:var(--text-muted);">@(user.IsOnline ? "Онлайн" : "Офлайн")</span>
+    </div>
+    <button class="btn-ghost" @onclick="LoadAll">↻ Оновити</button>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-bottom:1.25rem;">
+
+    <!-- Інфо про юзера -->
+    <div class="section">
+        <div class="section-header"><h2 class="section-title">👤 Інформація</h2></div>
+        <div style="padding:1rem;display:flex;flex-direction:column;gap:8px;">
+            <div class="stat-row"><span class="stat-row-label">Логін</span><span class="stat-row-val">@user.Username</span></div>
+            <div class="stat-row"><span class="stat-row-label">Відділ</span><span class="stat-row-val">@(user.Department ?? "—")</span></div>
+            <div class="stat-row"><span class="stat-row-label">Роль</span><span class="stat-row-val">@user.Role</span></div>
+            <div class="stat-row"><span class="stat-row-label">Зареєстровано</span><span class="stat-row-val">@user.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")</span></div>
+            <div class="stat-row"><span class="stat-row-label">Всього дій</span><span class="stat-row-val">@totalActions</span></div>
+            <div class="stat-row"><span class="stat-row-label">Порушень</span><span class="stat-row-val" style="color:var(--red);">@totalViolations</span></div>
+        </div>
+
+        <!-- Зміна ролі -->
+        <div style="padding:0 1rem 1rem;display:flex;gap:8px;">
+            @if (user.Role == "User")
+            {
+                <button class="btn-primary" style="font-size:12px;padding:5px 12px;"
+                        @onclick="MakeAdmin">↑ Зробити адміном</button>
+            }
+            else
+            {
+                <button class="btn-ghost" style="font-size:12px;padding:5px 12px;"
+                        @onclick="MakeUser">↓ Зробити юзером</button>
+            }
+            <button class="btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--red);border-color:var(--red);"
+                    @onclick="DeleteUser">🗑 Видалити</button>
+        </div>
+
+        <!-- Скидання пароля -->
+        <div style="padding:0 1rem 1rem;border-top:1px solid var(--border);padding-top:1rem;">
+            <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Скинути пароль</div>
+            <div style="display:flex;gap:8px;">
+                <input class="filter-input" type="password" @bind="newPassword"
+                       placeholder="Новий пароль (мін. 6 символів)" style="flex:1;"/>
+                <button class="btn-primary" style="font-size:12px;padding:5px 12px;"
+                        @onclick="ResetPassword"
+                        disabled="@(newPassword.Length < 6)">Змінити</button>
+            </div>
+            @if (!string.IsNullOrEmpty(pwFeedback))
+            { <div style="color:var(--green);font-size:12px;margin-top:6px;">@pwFeedback</div> }
+        </div>
+
+        <!-- Надіслати повідомлення -->
+        <div style="padding:0 1rem 1rem;border-top:1px solid var(--border);padding-top:1rem;">
+            <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">Надіслати повідомлення</div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <input class="filter-input" @bind="msgTitle" placeholder="Заголовок"/>
+                <textarea class="filter-input" @bind="msgText" placeholder="Текст..."
+                          style="min-height:60px;resize:vertical;padding:8px;"></textarea>
+                <button class="btn-primary" style="font-size:12px;padding:5px 12px;align-self:flex-start;"
+                        @onclick="SendMessage" disabled="@string.IsNullOrWhiteSpace(msgText)">
+                    📤 Надіслати
+                </button>
+                @if (!string.IsNullOrEmpty(msgFeedback))
+                { <div style="color:var(--green);font-size:12px;">@msgFeedback</div> }
+            </div>
+        </div>
+    </div>
+
+    <!-- Пристрої + статистика -->
+    <div style="display:flex;flex-direction:column;gap:1rem;">
+        <div class="section">
+            <div class="section-header"><h2 class="section-title">💻 Пристрої (@devices.Count)</h2></div>
+            @if (!devices.Any())
+            { <div style="padding:1rem;color:var(--text-muted);font-size:13px;">Немає пристроїв</div> }
+            @foreach (var d in devices)
+            {
+                <div style="padding:0.75rem 1rem;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <div style="font-size:13px;color:var(--text-primary);">@d.DisplayName</div>
+                        <div style="font-size:11px;color:var(--text-muted);">@d.Platform • @d.OsVersion</div>
+                        <div style="font-size:11px;color:var(--text-muted);">Остання активність: @d.LastSeen.ToLocalTime().ToString("dd.MM HH:mm")</div>
+                    </div>
+                    <span class="badge @(d.IsActive ? "badge-active" : "badge-inactive")">@(d.IsActive?"Активний":"Неакт.")</span>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Останні порушення -->
+<div class="section">
+    <div class="section-header">
+        <h2 class="section-title">🚨 Порушення (@violations.Count(v => !v.IsAcknowledged) нових)</h2>
+        @if (violations.Any(v => !v.IsAcknowledged))
+        {
+            <button class="btn-ghost" style="font-size:12px;" @onclick="AckAll">✓ Прочитати всі</button>
+        }
+    </div>
+    @if (!violations.Any())
+    { <div style="padding:1rem;color:var(--text-muted);font-size:13px;">Порушень немає</div> }
+    else
+    {
+        <table class="data-table">
+            <thead><tr><th>Час</th><th>Правило</th><th>Severity</th><th>Деталі</th><th>Статус</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var v in violations.Take(20))
+                {
+                    <tr class="@(v.IsAcknowledged ? "row-acked" : "row-new")">
+                        <td class="text-muted">@v.OccurredAt.ToLocalTime().ToString("dd.MM HH:mm:ss")</td>
+                        <td>@v.RuleName</td>
+                        <td><span class="badge badge-@v.Severity.ToLower()">@v.Severity</span></td>
+                        <td class="text-muted small">@v.Details</td>
+                        <td>@(v.IsAcknowledged ? "✓" : "⚡ Нове")</td>
+                        <td>@if (!v.IsAcknowledged)
+                            { <button class="btn-ack" @onclick="() => Ack(v.Id)">✓</button> }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+<!-- Останні логи -->
+<div class="section">
+    <div class="section-header"><h2 class="section-title">📋 Останні логи</h2></div>
+    <table class="data-table">
+        <thead><tr><th>Час</th><th>Дія</th><th>Деталі</th><th>IP</th></tr></thead>
+        <tbody>
+            @foreach (var l in logs.Take(30))
+            {
+                <tr>
+                    <td class="text-muted">@l.Timestamp.ToLocalTime().ToString("dd.MM HH:mm:ss")</td>
+                    <td><span class="badge badge-type">@l.Action</span></td>
+                    <td class="text-muted small">@l.Details</td>
+                    <td class="text-muted small">@l.IpAddress</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+}
+
+@code {
+    [Parameter] public string UserId { get; set; } = "";
+
+    private UserData? user;
+    private List<DeviceData>     devices    = new();
+    private List<ViolationData>  violations = new();
+    private List<LogData>        logs       = new();
+    private long totalActions, totalViolations;
+    private bool isLoading, _authorized, _rendered;
+    private string newPassword = "", pwFeedback = "";
+    private string msgTitle = "", msgText = "", msgFeedback = "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _rendered) return;
+        _rendered = true;
+        try
+        {
+                var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (string.IsNullOrEmpty(token)) { Nav.NavigateTo("/login", forceLoad: false); return; }
+        _authorized = true;
+        StateHasChanged();
+        await LoadAll();
+            StateHasChanged();
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (Exception) { }
+    }
+
+    private async Task LoadAll()
+    {
+        isLoading = true; StateHasChanged();
+        try
+        {
+            var http = await GetHttp();
+
+            // User info
+            var allUsers = await http.GetFromJsonAsync<List<UserData>>("api/users") ?? new();
+            user = allUsers.FirstOrDefault(u => u.Id == UserId);
+
+            // Devices
+            var allDevs = await http.GetFromJsonAsync<List<DeviceData>>("api/devices/all") ?? new();
+            devices = allDevs.Where(d => d.UserId == UserId).ToList();
+
+            // Violations
+            var allViols = await http.GetFromJsonAsync<List<ViolationData>>(
+                $"api/rules/violations?pageSize=200") ?? new();
+            violations    = allViols.Where(v => v.UserId == UserId)
+                                    .OrderByDescending(v => v.OccurredAt).ToList();
+            totalViolations = violations.Count;
+
+            // Logs
+            var allLogs = await http.GetFromJsonAsync<List<LogData>>(
+                $"api/activity/logs?page=1&pageSize=100&userId={UserId}") ?? new();
+            logs         = allLogs;
+            totalActions = allLogs.Count;
+        }
+        catch { }
+        finally { isLoading = false; }
+    }
+
+    private Task MakeAdmin() => ChangeRole("Admin");
+    private Task MakeUser()  => ChangeRole("User");
+
+    private async Task ChangeRole(string role)
+    {
+        var http = await GetHttp();
+        await http.PatchAsJsonAsync($"api/users/{UserId}/role", new { Role = role });
+        await LoadAll();
+    }
+
+    private async Task DeleteUser()
+    {
+        var http = await GetHttp();
+        await http.DeleteAsync($"api/users/{UserId}");
+        Nav.NavigateTo("/", forceLoad: false);
+    }
+
+    private async Task ResetPassword()
+    {
+        if (newPassword.Length < 6) return;
+        var http = await GetHttp();
+        var r = await http.PatchAsJsonAsync($"api/users/{UserId}/password",
+            new { NewPassword = newPassword });
+        pwFeedback = r.IsSuccessStatusCode ? "✅ Пароль змінено" : "❌ Помилка";
+        newPassword = "";
+        await Task.Delay(3000); pwFeedback = ""; StateHasChanged();
+    }
+
+    private async Task SendMessage()
+    {
+        var http = await GetHttp();
+        await http.PostAsJsonAsync("api/rules/notify-user", new
+        {
+            UserId  = UserId,
+            Title   = string.IsNullOrEmpty(msgTitle) ? "Повідомлення від адміна" : msgTitle,
+            Message = msgText
+        });
+        msgFeedback = "✅ Надіслано!";
+        msgText = ""; msgTitle = "";
+        await Task.Delay(2000); msgFeedback = ""; StateHasChanged();
+    }
+
+    private async Task Ack(string id)
+    {
+        var http = await GetHttp();
+        await http.PatchAsync($"api/rules/violations/{id}/acknowledge", null);
+        var v = violations.FirstOrDefault(x => x.Id == id);
+        if (v != null) v.IsAcknowledged = true;
+        StateHasChanged();
+    }
+
+    private async Task AckAll()
+    {
+        var http = await GetHttp();
+        await http.PatchAsync($"api/rules/violations/acknowledge-all?username={user?.Username}", null);
+        foreach (var v in violations) v.IsAcknowledged = true;
+        StateHasChanged();
+    }
+
+    private async Task<HttpClient> GetHttp()
+    {
+        var http  = ClientFactory.CreateClient("API");
+        var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (!string.IsNullOrEmpty(token))
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return http;
+    }
+
+    class UserData
+    {
+        public string Id { get; set; } = ""; public string Username { get; set; } = "";
+        public string Role { get; set; } = ""; public string? Department { get; set; }
+        public bool IsOnline { get; set; }    public DateTime CreatedAt { get; set; }
+    }
+    class DeviceData
+    {
+        public string Id { get; set; } = "";        public string UserId { get; set; } = "";
+        public string DisplayName { get; set; } = "";public string Platform { get; set; } = "";
+        public string OsVersion { get; set; } = ""; public DateTime LastSeen { get; set; }
+        public bool IsActive { get; set; }
+    }
+    class ViolationData
+    {
+        public string Id { get; set; } = ""; public string UserId { get; set; } = "";
+        public string RuleName { get; set; } = "";  public string Severity { get; set; } = "";
+        public string Details { get; set; } = "";   public DateTime OccurredAt { get; set; }
+        public bool IsAcknowledged { get; set; }
+    }
+    class LogData
+    {
+        public string Action { get; set; } = "";  public string Details { get; set; } = "";
+        public string IpAddress { get; set; } = "";public DateTime Timestamp { get; set; }
+    }
+}

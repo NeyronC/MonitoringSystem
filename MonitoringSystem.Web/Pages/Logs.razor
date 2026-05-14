@@ -1,0 +1,135 @@
+@page "/logs"
+@using System.Net.Http.Json
+@inject IHttpClientFactory ClientFactory
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject NavigationManager Nav
+
+@if (!_authorized)
+{
+    <div style="display:none"></div>
+}
+else
+{
+<PageTitle>Логи — Моніторинг</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Логи активності</h1>
+    <button class="btn-ghost" @onclick="LoadLogs">↻ Оновити</button>
+</div>
+
+<div class="section">
+    <div class="filters">
+        <input class="filter-input" @bind="filterUser" @bind:event="oninput"
+               placeholder="Фільтр за користувачем..."/>
+        <input class="filter-input" @bind="filterAction" @bind:event="oninput"
+               placeholder="Фільтр за дією..."/>
+    </div>
+
+    @if (isLoading) { <div class="loading">Завантаження...</div> }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Час</th><th>Користувач</th><th>Дія</th>
+                    <th>Деталі</th><th>URL</th><th>IP</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var log in FilteredLogs)
+                {
+                    <tr>
+                        <td class="text-muted">@log.Timestamp.ToLocalTime().ToString("dd.MM HH:mm:ss")</td>
+                        <td><strong>@log.Username</strong></td>
+                        <td><span class="badge @GetActionBadge(log.Action)">@log.Action</span></td>
+                        <td class="text-muted small">@log.Details</td>
+                        <td class="text-muted small">@(log.Url ?? "—")</td>
+                        <td class="text-muted small">@log.IpAddress</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <div class="pagination">
+            <button class="btn-ghost" disabled="@(currentPage <= 1)" @onclick="PrevPage">← Назад</button>
+            <span class="page-info">Сторінка @currentPage</span>
+            <button class="btn-ghost" @onclick="NextPage">Вперед →</button>
+        </div>
+    }
+</div>
+}
+
+@code {
+    private List<LogDto> logs = new();
+    private string filterUser   = "";
+    private string filterAction = "";
+    private int currentPage = 1;
+    private bool isLoading;
+    private bool _rendered;
+    private bool _authorized;
+
+    private IEnumerable<LogDto> FilteredLogs => logs
+        .Where(l => string.IsNullOrEmpty(filterUser)   || l.Username.Contains(filterUser, StringComparison.OrdinalIgnoreCase))
+        .Where(l => string.IsNullOrEmpty(filterAction) || l.Action.Contains(filterAction, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _rendered) return;
+        _rendered = true;
+        try
+        {
+                var _authToken = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (string.IsNullOrEmpty(_authToken)) { Nav.NavigateTo("/login", forceLoad: false); return; }
+        _authorized = true;
+        StateHasChanged();
+        await LoadLogs();
+            StateHasChanged();
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (Exception) { }
+    }
+
+    private async Task LoadLogs()
+    {
+        isLoading = true;
+        try
+        {
+            var http = await GetHttpAsync();
+            var resp = await http.GetAsync($"api/activity/logs?page={currentPage}&pageSize=50");
+            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            { Nav.NavigateTo("/login", forceLoad: true); return; }
+            logs = await resp.Content.ReadFromJsonAsync<List<LogDto>>() ?? new();
+        }
+        finally { isLoading = false; }
+    }
+
+    private async Task NextPage() { currentPage++; await LoadLogs(); }
+    private async Task PrevPage() { if (currentPage > 1) { currentPage--; await LoadLogs(); } }
+
+    private string GetActionBadge(string action) => action switch
+    {
+        "Login"         => "badge-active",
+        "Logout"        => "badge-inactive",
+        "WebNavigation" => "badge-type",
+        _               => "badge-user"
+    };
+
+    private async Task<HttpClient> GetHttpAsync()
+    {
+        var http  = ClientFactory.CreateClient("API");
+        var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (!string.IsNullOrEmpty(token))
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return http;
+    }
+
+    class LogDto
+    {
+        public string Id { get; set; } = "";       public string Action { get; set; } = "";
+        public string Details { get; set; } = "";  public string? Url { get; set; }
+        public string IpAddress { get; set; } = ""; public string Username { get; set; } = "";
+        public DateTime Timestamp { get; set; }
+    }
+}

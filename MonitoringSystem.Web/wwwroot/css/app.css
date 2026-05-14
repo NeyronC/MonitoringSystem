@@ -1,0 +1,3 @@
+/* Minimal reset — all styles are in dashboard.css */
+html, body { height: 100%; }
+a { color: inherit; }

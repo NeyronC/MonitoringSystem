@@ -1,0 +1,345 @@
+@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@using System.Net.Http.Json
+@inject IHttpClientFactory ClientFactory
+@inject NavigationManager Nav
+@inject IConfiguration Config
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@implements IAsyncDisposable
+
+<PageTitle>Dashboard — Моніторинг</PageTitle>
+
+@if (!_authorized) { <div style="display:none"></div> }
+else
+{
+<div class="page-header">
+    <h1 class="page-title">Dashboard</h1>
+    <div style="display:flex;align-items:center;gap:12px;">
+        <span style="color:var(--text-muted);font-size:0.8rem;">↻ @_countdown с</span>
+        <div class="hub-status @(hubConnected ? "connected" : "disconnected")">
+            <span class="dot-small"></span>
+            @(hubConnected ? "Live" : "Офлайн")
+        </div>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card green">
+        <div class="stat-number">@users.Count(u => u.IsOnline)</div>
+        <div class="stat-label">Онлайн зараз</div>
+    </div>
+    <div class="stat-card purple">
+        <div class="stat-number">@users.Count</div>
+        <div class="stat-label">Всього юзерів</div>
+    </div>
+    <div class="stat-card red">
+        <div class="stat-number">@unacknowledgedCount</div>
+        <div class="stat-label">Нових порушень</div>
+    </div>
+    <div class="stat-card blue">
+        <div class="stat-number">@activeRules</div>
+        <div class="stat-label">Активних правил</div>
+    </div>
+</div>
+
+<!-- Live сповіщення -->
+@if (liveAlerts.Any())
+{
+    <div class="section">
+        <div class="section-header">
+            <h2 class="section-title">🔴 Live порушення</h2>
+            <button class="btn-ghost" @onclick="() => { liveAlerts.Clear(); StateHasChanged(); }">Очистити</button>
+        </div>
+        <div class="alerts-list">
+            @foreach (var alert in liveAlerts.AsEnumerable().Reverse().Take(10))
+            {
+                <div class="alert-item @alert.Severity.ToLower() @(alert.IsAcknowledged ? "acked" : "")">
+                    <span class="alert-time">@alert.OccurredAt.ToLocalTime().ToString("HH:mm:ss")</span>
+                    <span class="alert-severity-badge @alert.Severity.ToLower()">@alert.Severity</span>
+                    <span class="alert-body">
+                        <strong>@alert.Username</strong> — @alert.RuleName
+                        <span class="alert-details">@alert.Details</span>
+                    </span>
+                    <div style="display:flex;gap:4px;flex-shrink:0;">
+                        @if (!alert.IsAcknowledged)
+                        {
+                            <button class="btn-ack" @onclick="() => AcknowledgeAlert(alert.ViolationId)"
+                                    title="Підтвердити">✓</button>
+                        }
+                        <button class="btn-ghost" style="padding:3px 8px;font-size:11px;"
+                                @onclick="() => QuickNotify(alert.UserId, alert.Username)"
+                                title="Надіслати повідомлення юзеру">💬</button>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<!-- Форма швидкого повідомлення (з'являється при натисканні 💬) -->
+@if (showNotifyForm)
+{
+    <div class="section" style="border-color:var(--accent);border-width:2px;">
+        <div class="section-header">
+            <h2 class="section-title">💬 Повідомлення → @notifyUsername</h2>
+            <button class="btn-ghost" @onclick="() => showNotifyForm = false">✕</button>
+        </div>
+        <div style="padding:1rem;display:flex;flex-direction:column;gap:10px;">
+            <input class="filter-input" style="width:100%;" @bind="notifyTitle"
+                   placeholder="Заголовок (напр. Попередження)"/>
+            <textarea class="filter-input" @bind="notifyText"
+                      placeholder="Текст повідомлення..."
+                      style="resize:vertical;min-height:60px;padding:8px;width:100%;"></textarea>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <button class="btn-primary" @onclick="SendNotify"
+                        disabled="@string.IsNullOrWhiteSpace(notifyText)">
+                    📤 Надіслати
+                </button>
+                <button class="btn-ghost" @onclick="() => showNotifyForm = false">Скасувати</button>
+                @if (!string.IsNullOrEmpty(notifyFeedback))
+                { <span style="color:var(--green);font-size:0.85rem;">@notifyFeedback</span> }
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Таблиця юзерів -->
+<div class="section">
+    <div class="section-header">
+        <h2 class="section-title">Користувачі</h2>
+        <button class="btn-ghost" @onclick="LoadData">↻ Оновити</button>
+    </div>
+    @if (isLoading)
+    {
+        <div class="loading">Завантаження...</div>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Статус</th><th>Користувач</th><th>Відділ</th>
+                    <th>Роль</th><th>Остання активність</th><th>Дій</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var u in users.OrderByDescending(u => u.IsOnline))
+                {
+                    <tr class="@(u.IsOnline ? "row-online" : "")">
+                        <td>
+                            <span class="status-dot @(u.IsOnline ? "online" : "offline")"></span>
+                            @(u.IsOnline ? "Онлайн" : "Офлайн")
+                        </td>
+                        <td><strong>@u.Username</strong></td>
+                        <td>@u.Department</td>
+                        <td><span class="badge @(u.Role == "Admin" ? "badge-admin" : "badge-user")">@u.Role</span></td>
+                        <td>@(u.LastActivity.HasValue ? u.LastActivity.Value.ToLocalTime().ToString("dd.MM HH:mm") : "—")</td>
+                        <td>@u.TotalActions</td>
+                        <td style="display:flex;gap:4px;">
+                            <!-- Деталі — переходить на сторінку деталей цього юзера -->
+                            <a href="/user-details/@u.Id" class="btn-ghost"
+                               style="padding:3px 8px;font-size:11px;text-decoration:none;">
+                                🔍
+                            </a>
+                            <!-- Надіслати повідомлення -->
+                            <button class="btn-ghost" style="padding:3px 8px;font-size:11px;"
+                                    @onclick="() => QuickNotify(u.Id, u.Username)"
+                                    title="Надіслати повідомлення">💬</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+}
+
+@code {
+    private List<UserDto>   users      = new();
+    private List<LiveAlert> liveAlerts = new();
+    private HubConnection?  hubConnection;
+    private bool  hubConnected, isLoading, _authorized, _rendered;
+    private int   unacknowledgedCount, activeRules, _countdown = 30;
+
+    // Форма повідомлення
+    private bool   showNotifyForm;
+    private string notifyUserId   = "";
+    private string notifyUsername = "";
+    private string notifyTitle    = "";
+    private string notifyText     = "";
+    private string notifyFeedback = "";
+
+    private System.Threading.Timer? _refreshTimer, _countdownTimer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _rendered) return;
+        _rendered = true;
+        try
+        {
+                var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (string.IsNullOrEmpty(token)) { Nav.NavigateTo("/login", forceLoad: false); return; }
+        _authorized = true;
+        StateHasChanged();
+        await LoadData();
+        await ConnectHub();
+        _refreshTimer   = new System.Threading.Timer(async _ =>
+            await InvokeAsync(async () => { await LoadData(); _countdown = 30; StateHasChanged(); }),
+            null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        _countdownTimer = new System.Threading.Timer(_ =>
+            InvokeAsync(() => { _countdown = Math.Max(0, _countdown-1); StateHasChanged(); return Task.CompletedTask; }),
+            null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+            StateHasChanged();
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (Exception) { }
+    }
+
+    private async Task LoadData()
+    {
+        isLoading = true; StateHasChanged();
+        try
+        {
+            var http = await GetHttpAsync();
+            var uResp = await http.GetAsync("api/activity/users");
+            if (uResp.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                uResp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            { Nav.NavigateTo("/login", forceLoad: true); return; }
+            users = await uResp.Content.ReadFromJsonAsync<List<UserDto>>() ?? new();
+
+            var vResp = await http.GetAsync("api/rules/violations?pageSize=5");
+            if (vResp.IsSuccessStatusCode)
+            {
+                var v = await vResp.Content.ReadFromJsonAsync<List<ViolDto>>() ?? new();
+                unacknowledgedCount = v.Count(x => !x.IsAcknowledged);
+            }
+
+            var rResp = await http.GetAsync("api/rules");
+            if (rResp.IsSuccessStatusCode)
+            {
+                var r = await rResp.Content.ReadFromJsonAsync<List<RuleDto>>() ?? new();
+                activeRules = r.Count(x => x.IsActive);
+            }
+        }
+        catch { }
+        finally { isLoading = false; }
+    }
+
+    private async Task ConnectHub()
+    {
+        try
+        {
+            hubConnection = new HubConnectionBuilder()
+                .WithUrl(Config["SignalRHubUrl"] ?? "http://localhost:5000/hubs/activity", opts =>
+                    opts.AccessTokenProvider = async () =>
+                        await LocalStorage.GetItemAsStringAsync("auth_token"))
+                .WithAutomaticReconnect().Build();
+
+            hubConnection.On<LiveAlert>("RuleViolation", alert =>
+            {
+                liveAlerts.Add(alert);
+                unacknowledgedCount++;
+                InvokeAsync(StateHasChanged);
+            });
+            hubConnection.On<object>("UserOnline",  _ => InvokeAsync(async () =>
+                { await LoadData(); _countdown = 30; StateHasChanged(); }));
+            hubConnection.On<object>("UserOffline", _ => InvokeAsync(async () =>
+                { await LoadData(); _countdown = 30; StateHasChanged(); }));
+            hubConnection.On<object>("NewActivity", _ => InvokeAsync(async () =>
+                { await LoadData(); _countdown = 30; StateHasChanged(); }));
+            hubConnection.Reconnected += _ => { hubConnected = true;  return InvokeAsync(StateHasChanged); };
+            hubConnection.Closed      += _ => { hubConnected = false; return InvokeAsync(StateHasChanged); };
+            await hubConnection.StartAsync();
+            hubConnected = true;
+        }
+        catch { hubConnected = false; }
+    }
+
+    private async Task AcknowledgeAlert(string violationId)
+    {
+        try
+        {
+            var http = await GetHttpAsync();
+            await http.PatchAsync($"api/rules/violations/{violationId}/acknowledge", null);
+            var alert = liveAlerts.FirstOrDefault(a => a.ViolationId == violationId);
+            if (alert != null) { alert.IsAcknowledged = true; unacknowledgedCount--; }
+            StateHasChanged();
+        }
+        catch { }
+    }
+
+    private void QuickNotify(string userId, string username)
+    {
+        notifyUserId   = userId;
+        notifyUsername = username;
+        notifyTitle    = "Попередження";
+        notifyText     = "";
+        notifyFeedback = "";
+        showNotifyForm = true;
+    }
+
+    private async Task SendNotify()
+    {
+        if (string.IsNullOrWhiteSpace(notifyText)) return;
+        try
+        {
+            var http = await GetHttpAsync();
+            var resp = await http.PostAsJsonAsync("api/rules/notify-user", new
+            {
+                UserId  = notifyUserId,
+                Title   = string.IsNullOrEmpty(notifyTitle) ? "Повідомлення від адміна" : notifyTitle,
+                Message = notifyText
+            });
+            if (resp.IsSuccessStatusCode)
+            {
+                notifyFeedback = "✅ Надіслано!";
+                notifyText = "";
+                await Task.Delay(2000);
+                showNotifyForm = false;
+                notifyFeedback = "";
+                StateHasChanged();
+            }
+        }
+        catch { }
+    }
+
+    private async Task<HttpClient> GetHttpAsync()
+    {
+        var http  = ClientFactory.CreateClient("API");
+        var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (!string.IsNullOrEmpty(token))
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return http;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _refreshTimer?.Dispose();
+        _countdownTimer?.Dispose();
+        if (hubConnection != null) await hubConnection.DisposeAsync();
+    }
+
+    class UserDto
+    {
+        public string Id { get; set; } = ""; public string Username { get; set; } = "";
+        public string Department { get; set; } = ""; public string Role { get; set; } = "";
+        public bool IsOnline { get; set; }
+        public DateTime? LastActivity { get; set; }
+        public long TotalActions { get; set; }
+    }
+    class ViolDto   { public bool IsAcknowledged { get; set; } }
+    class RuleDto   { public bool IsActive { get; set; } }
+
+    public class LiveAlert
+    {
+        public string ViolationId { get; set; } = "";
+        public string UserId      { get; set; } = "";
+        public string Username    { get; set; } = "";
+        public string RuleName    { get; set; } = "";
+        public string Severity    { get; set; } = "";
+        public string Details     { get; set; } = "";
+        public DateTime OccurredAt { get; set; }
+        public bool IsAcknowledged { get; set; }
+    }
+}

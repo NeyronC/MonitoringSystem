@@ -1,0 +1,362 @@
+@page "/violations"
+@using System.Net.Http.Json
+@inject IHttpClientFactory ClientFactory
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject NavigationManager Nav
+
+<PageTitle>Порушення — Моніторинг</PageTitle>
+
+@if (!_authorized)
+{
+    <div style="display:none"></div>
+}
+else
+{
+<div class="page-header">
+    <h1 class="page-title">Порушення правил</h1>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <span class="badge badge-critical">@violations.Count(v => !v.IsAcknowledged) нових</span>
+        <button class="btn-primary" style="padding:6px 14px;font-size:0.82rem;"
+                @onclick="AcknowledgeAll" disabled="@(!violations.Any(v => !v.IsAcknowledged))">
+            ✓ Прочитати всі
+        </button>
+        @if (!string.IsNullOrEmpty(filterUser))
+        {
+            <button class="btn-ghost" style="padding:6px 14px;font-size:0.82rem;"
+                    @onclick="() => AcknowledgeAllForUser(filterUser)">
+                ✓ Прочитати для @filterUser
+            </button>
+        }
+    </div>
+</div>
+
+<!-- Панель фільтрів та сортування -->
+<div class="section" style="padding:14px 20px;">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span style="color:#64748b;font-size:0.82rem;">👤 Юзер:</span>
+            <input class="filter-input" style="width:160px;"
+                   @bind="filterUser" @bind:event="oninput"
+                   placeholder="Фільтр по юзеру..."/>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span style="color:#64748b;font-size:0.82rem;">Severity:</span>
+            <select class="filter-input" style="width:130px;" @bind="filterSeverity">
+                <option value="">Всі</option>
+                <option value="Critical">Critical</option>
+                <option value="Warning">Warning</option>
+                <option value="Info">Info</option>
+            </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span style="color:#64748b;font-size:0.82rem;">Статус:</span>
+            <select class="filter-input" style="width:130px;" @bind="filterStatus">
+                <option value="all">Всі</option>
+                <option value="new">Тільки нові</option>
+                <option value="acked">Підтверджені</option>
+            </select>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span style="color:#64748b;font-size:0.82rem;">Сортування:</span>
+            <select class="filter-input" style="width:160px;" @bind="sortBy">
+                <option value="time_desc">Час ↓ (новіші)</option>
+                <option value="time_asc">Час ↑ (старіші)</option>
+                <option value="user">По юзеру A–Z</option>
+                <option value="severity">По severity</option>
+            </select>
+        </div>
+        <button class="btn-ghost" @onclick="ResetFilters"
+                style="padding:6px 12px;font-size:0.82rem;">✕ Скинути</button>
+    </div>
+</div>
+
+<!-- Панель "Надіслати повідомлення" -->
+<div class="section" style="padding:14px 20px;">
+    <details>
+        <summary style="cursor:pointer;color:#7F77DD;font-weight:600;font-size:0.9rem;user-select:none;">
+            📢 Надіслати повідомлення юзеру
+        </summary>
+        <div style="margin-top:14px;display:flex;flex-direction:column;gap:10px;max-width:520px;">
+            <div style="display:flex;gap:10px;">
+                <select class="filter-input" style="flex:1;" @bind="msgUserId">
+                    <option value="">— Оберіть юзера —</option>
+                    @foreach (var u in allUsers)
+                    {
+                        <option value="@u.Id">@u.Username (@u.Department)</option>
+                    }
+                </select>
+            </div>
+            <input class="filter-input" @bind="msgTitle"
+                   placeholder="Заголовок (напр. Попередження)"/>
+            <textarea class="filter-input" @bind="msgText"
+                      placeholder="Текст повідомлення..."
+                      style="resize:vertical;min-height:70px;padding:8px;"></textarea>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <button class="btn-primary" @onclick="SendMessage"
+                        disabled="@(string.IsNullOrEmpty(msgUserId) || string.IsNullOrEmpty(msgText))"
+                        style="padding:8px 20px;">
+                    📤 Надіслати
+                </button>
+                @if (!string.IsNullOrEmpty(msgFeedback))
+                {
+                    <span style="color:#22c55e;font-size:0.85rem;">@msgFeedback</span>
+                }
+            </div>
+        </div>
+    </details>
+</div>
+
+<div class="section">
+    @if (isLoading)
+    {
+        <div class="loading">Завантаження...</div>
+    }
+    else if (!FilteredViolations.Any())
+    {
+        <div style="text-align:center;color:#475569;padding:40px;">
+            Немає порушень за обраними фільтрами
+        </div>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Час</th>
+                    <th style="cursor:pointer;" @onclick="SortByUser">
+                        Користувач @(sortBy == "user" ? "↑" : "")
+                    </th>
+                    <th>Правило</th>
+                    <th style="cursor:pointer;" @onclick="SortBySeverity">
+                        Severity @(sortBy == "severity" ? "↑" : "")
+                    </th>
+                    <th>Деталі</th>
+                    <th>Статус</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var v in FilteredViolations)
+                {
+                    <tr class="@(v.IsAcknowledged ? "row-acked" : "row-new")">
+                        <td class="text-muted" style="white-space:nowrap;">
+                            @v.OccurredAt.ToLocalTime().ToString("dd.MM HH:mm:ss")
+                        </td>
+                        <td>
+                            <strong style="cursor:pointer;color:#7F77DD;"
+                                    @onclick="() => filterUser = v.Username">
+                                @v.Username
+                            </strong>
+                        </td>
+                        <td>@v.RuleName</td>
+                        <td>
+                            <span class="badge badge-@v.Severity.ToLower()">@v.Severity</span>
+                        </td>
+                        <td class="text-muted small">@v.Details</td>
+                        <td>
+                            @if (v.IsAcknowledged)
+                            { <span class="badge badge-active">Прочитано</span> }
+                            else
+                            { <span class="badge badge-warning">Нове</span> }
+                        </td>
+                        <td style="display:flex;gap:4px;">
+                            @if (!v.IsAcknowledged)
+                            {
+                                <button class="btn-ack" @onclick="() => Acknowledge(v.Id)"
+                                        title="Підтвердити">✓</button>
+                            }
+                            <button class="btn-ghost" style="padding:3px 8px;font-size:0.75rem;"
+                                    @onclick="() => QuickMessage(v.Username)"
+                                    title="Надіслати повідомлення цьому юзеру">💬</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <div style="padding:10px 16px;color:#475569;font-size:0.82rem;">
+            Показано: @FilteredViolations.Count() з @violations.Count
+        </div>
+    }
+</div>
+}
+
+@code {
+    private List<ViolationDto> violations = new();
+    private List<UserDto>      allUsers   = new();
+    private bool isLoading;
+    private bool _rendered;
+    private bool _authorized;
+
+    // Фільтри
+    private string filterUser     = "";
+    private string filterSeverity = "";
+    private string filterStatus   = "all";
+    private string sortBy         = "time_desc";
+
+    // Повідомлення
+    private string msgUserId   = "";
+    private string msgTitle    = "";
+    private string msgText     = "";
+    private string msgFeedback = "";
+
+    private IEnumerable<ViolationDto> FilteredViolations
+    {
+        get
+        {
+            var q = violations.AsEnumerable();
+
+            if (!string.IsNullOrEmpty(filterUser))
+                q = q.Where(v => v.Username.Contains(filterUser, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(filterSeverity))
+                q = q.Where(v => v.Severity == filterSeverity);
+
+            q = filterStatus switch
+            {
+                "new"   => q.Where(v => !v.IsAcknowledged),
+                "acked" => q.Where(v =>  v.IsAcknowledged),
+                _       => q
+            };
+
+            q = sortBy switch
+            {
+                "time_asc"  => q.OrderBy(v => v.OccurredAt),
+                "user"      => q.OrderBy(v => v.Username),
+                "severity"  => q.OrderBy(v => v.Severity switch
+                    { "Critical" => 0, "Warning" => 1, _ => 2 }),
+                _           => q.OrderByDescending(v => v.OccurredAt)
+            };
+
+            return q;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _rendered) return;
+        _rendered = true;
+        try
+        {
+                var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (string.IsNullOrEmpty(token)) { Nav.NavigateTo("/login", forceLoad: false); return; }
+        _authorized = true;
+        StateHasChanged();
+        await LoadAll();
+            StateHasChanged();
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (Exception) { }
+    }
+
+    private async Task LoadAll()
+    {
+        isLoading = true;
+        try
+        {
+            var http = await GetHttpAsync();
+
+            var vResp = await http.GetAsync("api/rules/violations?pageSize=200");
+            if (vResp.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                vResp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            { Nav.NavigateTo("/login", forceLoad: true); return; }
+            violations = await vResp.Content.ReadFromJsonAsync<List<ViolationDto>>() ?? new();
+
+            var uResp = await http.GetAsync("api/users");
+            if (uResp.IsSuccessStatusCode)
+                allUsers = await uResp.Content.ReadFromJsonAsync<List<UserDto>>() ?? new();
+        }
+        finally { isLoading = false; }
+    }
+
+    private async Task Acknowledge(string id)
+    {
+        var http = await GetHttpAsync();
+        await http.PatchAsync($"api/rules/violations/{id}/acknowledge", null);
+        var v = violations.FirstOrDefault(v => v.Id == id);
+        if (v != null) v.IsAcknowledged = true;
+        StateHasChanged();
+    }
+
+    private async Task AcknowledgeAll()
+    {
+        var http = await GetHttpAsync();
+        await http.PatchAsync("api/rules/violations/acknowledge-all", null);
+        foreach (var v in violations) v.IsAcknowledged = true;
+        StateHasChanged();
+    }
+
+    private async Task AcknowledgeAllForUser(string username)
+    {
+        var http = await GetHttpAsync();
+        await http.PatchAsync($"api/rules/violations/acknowledge-all?username={Uri.EscapeDataString(username)}", null);
+        foreach (var v in violations.Where(v => v.Username == username))
+            v.IsAcknowledged = true;
+        StateHasChanged();
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrEmpty(msgUserId) || string.IsNullOrEmpty(msgText)) return;
+        var http = await GetHttpAsync();
+        var resp = await http.PostAsJsonAsync("api/rules/notify-user", new
+        {
+            UserId  = msgUserId,
+            Title   = string.IsNullOrEmpty(msgTitle) ? "Повідомлення від адміна" : msgTitle,
+            Message = msgText
+        });
+        if (resp.IsSuccessStatusCode)
+        {
+            msgFeedback = "✅ Надіслано!";
+            msgText = ""; msgTitle = "";
+            await Task.Delay(3000);
+            msgFeedback = "";
+            StateHasChanged();
+        }
+    }
+
+    private void QuickMessage(string username)
+    {
+        var user = allUsers.FirstOrDefault(u => u.Username == username);
+        if (user != null) msgUserId = user.Id;
+        msgTitle = "Попередження";
+        StateHasChanged();
+        // Scroll не можемо зробити без JS, але секція відкриється при наступному рендері
+    }
+
+    private void SetSort(string field) { sortBy = field; StateHasChanged(); }
+    private void SortByUser()     => SetSort("user");
+    private void SortBySeverity() => SetSort("severity");
+
+    private void ResetFilters()
+    {
+        filterUser = ""; filterSeverity = "";
+        filterStatus = "all"; sortBy = "time_desc";
+    }
+
+    private async Task<HttpClient> GetHttpAsync()
+    {
+        var http  = ClientFactory.CreateClient("API");
+        var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (!string.IsNullOrEmpty(token))
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return http;
+    }
+
+    class ViolationDto
+    {
+        public string Id        { get; set; } = "";
+        public string RuleName  { get; set; } = "";
+        public string Severity  { get; set; } = "";
+        public string Details   { get; set; } = "";
+        public string Username  { get; set; } = "";
+        public DateTime OccurredAt { get; set; }
+        public bool IsAcknowledged { get; set; }
+    }
+    class UserDto
+    {
+        public string Id { get; set; } = "";
+        public string Username { get; set; } = "";
+        public string Department { get; set; } = "";
+    }
+}

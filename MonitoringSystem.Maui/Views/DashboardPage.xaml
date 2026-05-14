@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:converters="clr-namespace:MonitoringSystem.Maui.Converters"
+             x:Class="MonitoringSystem.Maui.Views.DashboardPage"
+             Title="{Binding Title}">
+
+    <ContentPage.Resources>
+        <converters:BoolToColorConverter x:Key="BoolToColorConverter"
+                                         TrueColor="#22c55e"
+                                         FalseColor="#d1d5db"/>
+        <converters:NotNullConverter     x:Key="NotNullConverter"/>
+        <converters:BoolToStringConverter x:Key="BoolToStringConverter"/>
+    </ContentPage.Resources>
+
+    <Shell.TitleView>
+        <HorizontalStackLayout Spacing="10" VerticalOptions="Center" Padding="0,0,8,0">
+            <Label Text="{Binding Title}"
+                   FontSize="17" FontAttributes="Bold"
+                   VerticalOptions="Center"
+                   TextColor="{AppThemeBinding Light=#26215C, Dark=White}"/>
+            <Border BackgroundColor="#1D9E75"
+                    StrokeShape="RoundRectangle 12"
+                    StrokeThickness="0" Padding="8,3">
+                <Label Text="{Binding OnlineCount, StringFormat='{0} онлайн'}"
+                       TextColor="White" FontSize="12"/>
+            </Border>
+        </HorizontalStackLayout>
+    </Shell.TitleView>
+
+    <Grid RowDefinitions="Auto,*" RowSpacing="0">
+
+        <!-- Кнопки адмін-панелі (тільки для Admin) -->
+        <HorizontalStackLayout Grid.Row="0" Spacing="8"
+                               Padding="14,10"
+                               IsVisible="{Binding IsAdmin}">
+
+            <Button Text="👥 Юзери"
+                    Command="{Binding NavigateToUsersCommand}"
+                    BackgroundColor="#EEEDFE" TextColor="#534AB7"
+                    CornerRadius="8" FontSize="13" HeightRequest="36"
+                    Padding="12,0"/>
+
+            <Button Text="⚙️ Правила"
+                    Command="{Binding NavigateToRulesCommand}"
+                    BackgroundColor="#FAEEDA" TextColor="#854F0B"
+                    CornerRadius="8" FontSize="13" HeightRequest="36"
+                    Padding="12,0"/>
+
+            <Button Text="💻 Пристрої"
+                    Command="{Binding NavigateToDevicesCommand}"
+                    BackgroundColor="#E1F5EE" TextColor="#0F6E56"
+                    CornerRadius="8" FontSize="13" HeightRequest="36"
+                    Padding="12,0"/>
+        </HorizontalStackLayout>
+
+        <!-- Список користувачів -->
+        <RefreshView Grid.Row="1"
+                     Command="{Binding RefreshCommand}"
+                     IsRefreshing="{Binding IsBusy}">
+            <CollectionView ItemsSource="{Binding Users}"
+                            Margin="12,4,12,12">
+
+                <CollectionView.EmptyView>
+                    <Label Text="Немає даних. Потягніть для оновлення."
+                           HorizontalTextAlignment="Center"
+                           TextColor="Gray" Margin="0,40"/>
+                </CollectionView.EmptyView>
+
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Border Margin="0,4" Padding="14"
+                                StrokeShape="RoundRectangle 12"
+                                StrokeThickness="1"
+                                Stroke="{AppThemeBinding Light=#E8E6FF, Dark=#3C3489}">
+
+                            <Grid ColumnDefinitions="12,*,Auto" ColumnSpacing="12">
+
+                                <!-- Статус-крапка -->
+                                <Ellipse Grid.Column="0"
+                                         WidthRequest="10" HeightRequest="10"
+                                         VerticalOptions="Center"
+                                         Fill="{Binding IsOnline,
+                                             Converter={StaticResource BoolToColorConverter}}"/>
+
+                                <VerticalStackLayout Grid.Column="1" Spacing="2">
+                                    <HorizontalStackLayout Spacing="8">
+                                        <Label Text="{Binding Username}"
+                                               FontAttributes="Bold" FontSize="15"/>
+                                        <Border StrokeShape="RoundRectangle 10"
+                                                StrokeThickness="0" Padding="5,2">
+                                            <Border.BackgroundColor>
+                                                <Binding Path="Role">
+                                                    <Binding.Converter>
+                                                        <converters:RoleColorConverter/>
+                                                    </Binding.Converter>
+                                                </Binding>
+                                            </Border.BackgroundColor>
+                                            <Label Text="{Binding Role}"
+                                                   FontSize="10" FontAttributes="Bold"
+                                                   TextColor="#534AB7"/>
+                                        </Border>
+                                    </HorizontalStackLayout>
+
+                                    <Label Text="{Binding Department}"
+                                           FontSize="12" TextColor="Gray"/>
+
+                                    <Label FontSize="11" TextColor="Gray"
+                                           IsVisible="{Binding LastActivity,
+                                               Converter={StaticResource NotNullConverter}}">
+                                        <Label.Text>
+                                            <Binding Path="LastActivity"
+                                                     StringFormat="Активність: {0:dd.MM HH:mm}"/>
+                                        </Label.Text>
+                                    </Label>
+                                </VerticalStackLayout>
+
+                                <Label Grid.Column="2"
+                                       Text="{Binding TotalActions, StringFormat='{0} дій'}"
+                                       FontSize="12" TextColor="#7F77DD"
+                                       VerticalOptions="Center"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+
+    </Grid>
+</ContentPage>

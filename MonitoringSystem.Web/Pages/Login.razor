@@ -1,0 +1,247 @@
+@page "/login"
+@layout EmptyLayout
+@using System.Net.Http.Json
+@inject IHttpClientFactory ClientFactory
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject NavigationManager Nav
+
+<PageTitle>Вхід — Моніторинг</PageTitle>
+
+<div class="login-bg">
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-orb orb-3"></div>
+
+    <div class="login-container">
+        <div class="login-info">
+            <div class="info-logo">
+                <svg width="52" height="52" viewBox="0 0 48 48" fill="none">
+                    <rect width="48" height="48" rx="14" fill="url(#g1)"/>
+                    <path d="M24 12 L32 16 L32 26 Q32 32 24 36 Q16 32 16 26 L16 16 Z" fill="white" opacity="0.9"/>
+                    <path d="M21 24 L23 26 L27 22" stroke="#7F77DD" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <defs>
+                        <linearGradient id="g1" x1="0" y1="0" x2="48" y2="48">
+                            <stop offset="0%" stop-color="#7F77DD"/>
+                            <stop offset="100%" stop-color="#4f46e5"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </div>
+            <h2 class="info-title">Система<br/>моніторингу</h2>
+            <p class="info-desc">Корпоративна платформа контролю активності користувачів у реальному часі</p>
+            <div class="info-features">
+                <div class="feature-item"><span class="feature-icon">📊</span><span>Real-time дашборд активності</span></div>
+                <div class="feature-item"><span class="feature-icon">🔒</span><span>Правила блокування та сповіщень</span></div>
+                <div class="feature-item"><span class="feature-icon">💻</span><span>Управління пристроями</span></div>
+                <div class="feature-item"><span class="feature-icon">⚡</span><span>SignalR WebSocket сповіщення</span></div>
+            </div>
+        </div>
+
+        <div class="login-form-panel">
+            <div class="login-card">
+                <div class="card-header">
+                    <h1>Вхід до системи</h1>
+                    <p>Введіть ваші облікові дані</p>
+                </div>
+
+                @if (!string.IsNullOrEmpty(error))
+                {
+                    <div class="alert-error">⚠️ @error</div>
+                }
+
+                <div class="form-body">
+                    <div class="field-group">
+                        <label class="field-label">Логін</label>
+                        <div class="field-wrap">
+                            <span class="field-icon">👤</span>
+                            <input class="field-input" @bind="username" @onkeydown="HandleKey"
+                                   placeholder="Введіть логін" autocomplete="username"/>
+                        </div>
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label">Пароль</label>
+                        <div class="field-wrap">
+                            <span class="field-icon">🔑</span>
+                            <input class="field-input" type="password" @bind="password" @onkeydown="HandleKey"
+                                   placeholder="Введіть пароль" autocomplete="current-password"/>
+                        </div>
+                    </div>
+                    <button class="btn-login" @onclick="DoLogin" disabled="@isLoading">
+                        @if (isLoading) { <span class="spinner"></span><span>Перевірка...</span> }
+                        else            { <span>Увійти →</span> }
+                    </button>
+                </div>
+
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.login-bg {
+    min-height: 100vh;
+    background: radial-gradient(ellipse at 20% 50%, #1a1040 0%, #0a0d16 50%, #060810 100%);
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden; padding: 1.5rem;
+    box-sizing: border-box;
+}
+.bg-orb { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.18; animation: floatOrb 9s ease-in-out infinite; }
+.orb-1 { width: 550px; height: 550px; background: #7F77DD; top: -180px; left: -120px; animation-delay: 0s; }
+.orb-2 { width: 450px; height: 450px; background: #4f46e5; bottom: -120px; right: -80px; animation-delay: -3.5s; }
+.orb-3 { width: 350px; height: 350px; background: #818cf8; top: 40%; left: 40%; animation-delay: -7s; }
+@@keyframes floatOrb { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-25px) scale(1.04); } }
+
+.login-container {
+    display: flex; align-items: center; gap: 3.5rem;
+    max-width: 920px; width: 100%; position: relative; z-index: 1;
+}
+
+/* Ліва панель */
+.login-info { flex: 1; color: white; padding: 1rem; }
+.info-logo { margin-bottom: 1.75rem; }
+.info-title {
+    font-size: 2.6rem; font-weight: 800; line-height: 1.15;
+    margin: 0 0 1rem;
+    background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.info-desc { color: #94a3b8; font-size: 1rem; line-height: 1.65; margin: 0 0 2rem; }
+.info-features { display: flex; flex-direction: column; gap: 1rem; }
+.feature-item { display: flex; align-items: center; gap: 0.875rem; color: #cbd5e1; font-size: 0.9rem; }
+.feature-icon { font-size: 1.1rem; width: 26px; text-align: center; }
+
+/* Права форм-панель */
+.login-form-panel { flex: 0 0 390px; }
+.login-card {
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 22px; padding: 2.5rem;
+    box-shadow: 0 30px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.12);
+}
+.card-header { margin-bottom: 2rem; text-align: center; }
+.card-header h1 { color: #f1f5f9; font-size: 1.5rem; font-weight: 700; margin: 0 0 0.3rem; }
+.card-header p  { color: #64748b; font-size: 0.875rem; margin: 0; }
+
+.alert-error {
+    display: flex; align-items: center; gap: 0.5rem;
+    background: rgba(239,68,68,0.14); border: 1px solid rgba(239,68,68,0.35);
+    color: #fca5a5; border-radius: 10px;
+    padding: 0.75rem 1rem; margin-bottom: 1.5rem; font-size: 0.875rem;
+    animation: shake 0.35s ease;
+}
+@@keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+
+.form-body { display: flex; flex-direction: column; gap: 1.25rem; }
+.field-group { display: flex; flex-direction: column; gap: 0.5rem; }
+.field-label { color: #94a3b8; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.field-wrap { position: relative; display: flex; align-items: center; }
+.field-icon { position: absolute; left: 0.875rem; font-size: 0.9rem; pointer-events: none; }
+.field-input {
+    width: 100%; padding: 0.8rem 0.875rem 0.8rem 2.6rem;
+    background: rgba(10,12,22,0.65); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 11px; color: #e2e8f0; font-size: 0.95rem;
+    transition: border-color .2s, box-shadow .2s, background .2s;
+    box-sizing: border-box; outline: none;
+}
+.field-input:focus {
+    border-color: #7F77DD; background: rgba(10,12,22,0.9);
+    box-shadow: 0 0 0 3px rgba(127,119,221,0.2);
+}
+.field-input::placeholder { color: #2d3548; }
+
+.btn-login {
+    width: 100%; padding: 0.9rem; margin-top: 0.5rem;
+    background: linear-gradient(135deg, #7F77DD 0%, #4f46e5 100%);
+    border: none; border-radius: 11px; color: white;
+    font-size: 1rem; font-weight: 600; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    transition: transform .15s, box-shadow .15s;
+    box-shadow: 0 4px 18px rgba(127,119,221,0.45);
+    position: relative; overflow: hidden;
+}
+.btn-login::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.12) 0%, transparent 60%);
+}
+.btn-login:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(127,119,221,0.55); }
+.btn-login:active:not(:disabled) { transform: translateY(0); }
+.btn-login:disabled { opacity: 0.65; cursor: not-allowed; }
+
+.spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.3); border-top-color: white;
+    border-radius: 50%; animation: spin .7s linear infinite; display: inline-block;
+}
+@@keyframes spin { to { transform: rotate(360deg); } }
+
+.card-footer { margin-top: 1.5rem; text-align: center; padding-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.07); }
+
+
+@@media (max-width: 720px) {
+    .login-container { flex-direction: column; gap: 1.5rem; }
+    .login-info { text-align: center; }
+    .info-features { align-items: flex-start; }
+    .info-title { font-size: 2rem; }
+    .login-form-panel { flex: none; width: 100%; max-width: 400px; }
+}
+</style>
+
+@code {
+    private string username = "";
+    private string password = "";
+    private string error    = "";
+    private bool isLoading;
+    private bool _rendered;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _rendered) return;
+        _rendered = true;
+        var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (!string.IsNullOrEmpty(token))
+            Nav.NavigateTo("/", forceLoad: false);
+    }
+
+    private async Task HandleKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await DoLogin();
+    }
+
+    private async Task DoLogin()
+    {
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+        { error = "Введіть логін та пароль"; return; }
+
+        isLoading = true; error = ""; StateHasChanged();
+
+        try
+        {
+            var http = ClientFactory.CreateClient("API");
+            var resp = await http.PostAsJsonAsync("api/auth/login", new { username, password });
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+                error = err?.GetValueOrDefault("message") ?? "Невірний логін або пароль";
+                return;
+            }
+
+            var data  = await resp.Content.ReadFromJsonAsync<Dictionary<string, object>>();
+            var token = data?["Token"]?.ToString() ?? "";
+            var role  = data?["Role"]?.ToString()  ?? "";
+
+            await LocalStorage.SetItemAsStringAsync("auth_token", token);
+            await LocalStorage.SetItemAsStringAsync("role", role);
+            await LocalStorage.SetItemAsStringAsync("username", username);
+            Nav.NavigateTo("/", forceLoad: false);
+        }
+        catch
+        {
+            error = "Немає зв'язку з сервером. Переконайся що API запущений (порт 5000).";
+        }
+        finally { isLoading = false; StateHasChanged(); }
+    }
+}

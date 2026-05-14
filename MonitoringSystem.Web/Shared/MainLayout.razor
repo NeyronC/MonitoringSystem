@@ -1,0 +1,117 @@
+@inherits LayoutComponentBase
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject NavigationManager Nav
+
+@* Поки не перевірили авторизацію — показуємо порожній екран (без flash) *@
+@if (!_ready)
+{
+    <div style="min-height:100vh;background:#0b0d14;"></div>
+}
+else
+{
+    <div class="layout">
+        <nav class="sidebar">
+            <div class="sidebar-brand">
+                <span class="brand-icon">🛡️</span>
+                <span class="brand-text">Моніторинг</span>
+            </div>
+            <ul class="nav-list">
+                @if (_role == "Admin")
+                {
+                    <li><a href="/"           class="nav-link @IsActive("/", exact: true)">📊 Dashboard</a></li>
+                    <li><a href="/stats"      class="nav-link @IsActive("/stats")">📈 Статистика</a></li>
+                    <li><a href="/users"      class="nav-link @IsActive("/users")">👥 Користувачі</a></li>
+                    <li><a href="/devices"    class="nav-link @IsActive("/devices")">💻 Пристрої</a></li>
+                    <li><a href="/rules"      class="nav-link @IsActive("/rules")">⚙️ Правила</a></li>
+                    <li><a href="/violations" class="nav-link @IsActive("/violations")">🚨 Порушення</a></li>
+                    <li><a href="/logs"       class="nav-link @IsActive("/logs")">📋 Логи</a></li>
+                }
+                else
+                {
+                    <li><a href="/profile" class="nav-link @IsActive("/profile")">👤 Мій профіль</a></li>
+                }
+            </ul>
+            <div class="sidebar-footer">
+                <div style="padding:0 0.5rem 0.5rem;font-size:11px;color:var(--text-muted);">
+                    @_username
+                    <span class="badge @(_role=="Admin"?"badge-admin":"badge-user")"
+                          style="margin-left:4px;font-size:9px;">@_role</span>
+                </div>
+                <button class="nav-link btn-logout" @onclick="Logout">🚪 Вийти</button>
+            </div>
+        </nav>
+        <main class="main-content">
+            @Body
+        </main>
+    </div>
+}
+
+@code {
+    private string _role     = "";
+    private string _username = "";
+    private bool   _ready;   // true лише після перевірки авторизації
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _ready) return;
+
+        try
+        {
+            var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+            var path  = new Uri(Nav.Uri).AbsolutePath;
+
+            // Не авторизований — на логін
+            if (string.IsNullOrEmpty(token))
+            {
+                if (!path.StartsWith("/login"))
+                    Nav.NavigateTo("/login", forceLoad: false);
+                _ready = true;
+                StateHasChanged();
+                return;
+            }
+
+            // Авторизований — читаємо роль
+            _role     = await LocalStorage.GetItemAsStringAsync("role")     ?? "";
+            _username = await LocalStorage.GetItemAsStringAsync("username") ?? "";
+            _ready    = true;
+
+            // User не може бути на адмін-сторінках
+            if (_role != "Admin")
+            {
+                var adminPaths = new[] { "/", "/stats", "/users", "/devices",
+                                         "/rules", "/violations", "/logs" };
+                if (adminPaths.Any(p => path == p || path.StartsWith(p + "/")))
+                {
+                    Nav.NavigateTo("/profile", forceLoad: false);
+                    StateHasChanged();
+                    return;
+                }
+            }
+
+            StateHasChanged();
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException)
+        {
+            // Circuit відключився — нормальна ситуація при закритті вкладки
+        }
+        catch (Exception)
+        {
+            // Інші JS помилки при відключенні — ігноруємо
+        }
+    }
+
+    private string IsActive(string path, bool exact = false)
+    {
+        var uri = new Uri(Nav.Uri).AbsolutePath;
+        if (exact) return uri == path ? "active" : "";
+        return uri.StartsWith(path) ? "active" : "";
+    }
+
+    private async Task Logout()
+    {
+        await LocalStorage.RemoveItemAsync("auth_token");
+        await LocalStorage.RemoveItemAsync("role");
+        await LocalStorage.RemoveItemAsync("username");
+        Nav.NavigateTo("/login", forceLoad: true);
+    }
+}

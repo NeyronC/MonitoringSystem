@@ -1,0 +1,201 @@
+@page "/devices"
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@using System.Net.Http.Json
+@inject IHttpClientFactory ClientFactory
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject IHttpClientFactory ClientFactory2
+@inject NavigationManager Nav
+@inject IConfiguration Config
+
+@if (!_authorized)
+{
+    <div style="display:none"></div>
+}
+else
+{
+<PageTitle>Пристрої — Моніторинг</PageTitle>
+
+<div class="page-header">
+    <h1 class="page-title">Пристрої</h1>
+    <div style="display:flex;gap:8px;">
+        <button class="btn-primary" @onclick="LoadDevices">↻ Оновити</button>
+        <button class="btn-ghost" @onclick="DedupDevices" title="Видалити дублікати пристроїв">
+            🧹 Прибрати дублі
+        </button>
+        @if (!string.IsNullOrEmpty(dedupMsg))
+        { <span style="font-size:12px;color:var(--green);align-self:center;">@dedupMsg</span> }
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <div class="loading">Завантаження...</div>
+}
+else
+{
+    <div class="section">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Платформа</th><th>Назва пристрою</th><th>Користувач</th>
+                    <th>ОС</th><th>Остання активність</th><th>Статус</th><th>Дії</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var d in devices)
+                {
+                    <tr>
+                        <td>
+                            <span class="platform-icon">
+                                @(d.Platform == "Windows" ? "🖥" : d.Platform == "Android" ? "📱" : "💻")
+                            </span>
+                            @d.Platform
+                        </td>
+                        <td>
+                            @if (editingId == d.Id)
+                            {
+                                <div class="inline-edit">
+                                    <input class="inline-input" @bind="editName"
+                                           @onkeydown="@(e => HandleKey(e, d.Id))"
+                                           placeholder="Назва пристрою"/>
+                                    <button class="btn-save" @onclick="() => SaveRename(d.Id)">✓</button>
+                                    <button class="btn-cancel" @onclick="CancelEdit">✕</button>
+                                </div>
+                            }
+                            else
+                            {
+                                <span class="device-name">@d.DisplayName</span>
+                                <button class="btn-edit-inline" @onclick="() => StartEdit(d.Id, d.DisplayName)">✏</button>
+                            }
+                        </td>
+                        <td>@d.Username</td>
+                        <td>@d.OsVersion</td>
+                        <td>@d.LastSeen.ToLocalTime().ToString("dd.MM.yy HH:mm")</td>
+                        <td>
+                            <span class="badge @(d.IsActive ? "badge-active" : "badge-inactive")">
+                                @(d.IsActive ? "Активний" : "Неактивний")
+                            </span>
+                        </td>
+                        <td><button class="btn-danger-sm" @onclick="() => DeleteDevice(d.Id)">✕</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+}
+
+@code {
+    private List<DeviceDto> devices = new();
+    private bool isLoading;
+    private bool _rendered;
+    private string dedupMsg = "";
+    private HubConnection? _hub;
+    private bool _authorized;
+    private string? editingId;
+    private string editName = "";
+
+    private async Task DedupDevices()
+    {
+        var http = await GetHttpAsync();
+        var resp = await http.PostAsync("api/devices/dedup", null);
+        if (resp.IsSuccessStatusCode)
+        {
+            var data = await resp.Content.ReadFromJsonAsync<Dictionary<string,object>>();
+            dedupMsg = data?.GetValueOrDefault("message")?.ToString() ?? "Готово";
+            await LoadDevices();
+            await Task.Delay(3000);
+            dedupMsg = "";
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _rendered) return;
+        _rendered = true;
+        try
+        {
+            var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+            if (string.IsNullOrEmpty(token)) { Nav.NavigateTo("/login", forceLoad: false); return; }
+            _authorized = true;
+            StateHasChanged();
+            await LoadDevices();
+
+            _hub = new HubConnectionBuilder()
+                .WithUrl(Config["SignalRHubUrl"] ?? "http://localhost:5000/hubs/activity", opts =>
+                    opts.AccessTokenProvider = async () =>
+                        await LocalStorage.GetItemAsStringAsync("auth_token"))
+                .WithAutomaticReconnect().Build();
+
+            _hub.On<object>("UserOnline",  _ => InvokeAsync(async () => { await LoadDevices(); StateHasChanged(); }));
+            _hub.On<object>("UserOffline", _ => InvokeAsync(async () => { await LoadDevices(); StateHasChanged(); }));
+            try { await _hub.StartAsync(); } catch { }
+            StateHasChanged();
+        }
+        catch (Microsoft.JSInterop.JSDisconnectedException) { }
+        catch (Exception) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hub != null) await _hub.DisposeAsync();
+    }
+
+    private async Task LoadDevices()
+    {
+        isLoading = true;
+        try { var http = await GetHttpAsync(); var resp = await http.GetAsync("api/devices/all");
+        if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+            resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        { Nav.NavigateTo("/login", forceLoad: true); return; }
+        devices = await resp.Content.ReadFromJsonAsync<List<DeviceDto>>() ?? new(); }
+        catch { }
+        finally { isLoading = false; }
+    }
+
+    private void StartEdit(string id, string currentName) { editingId = id; editName = currentName; }
+    private void CancelEdit() => editingId = null;
+
+    private async Task SaveRename(string id)
+    {
+        if (string.IsNullOrWhiteSpace(editName)) return;
+        var http = await GetHttpAsync();
+        await http.PatchAsJsonAsync($"api/devices/{id}/rename", new { Name = editName });
+        var dev = devices.FirstOrDefault(d => d.Id == id);
+        if (dev != null) dev.DisplayName = editName;
+        editingId = null;
+    }
+
+    private async Task HandleKey(KeyboardEventArgs e, string id)
+    {
+        if (e.Key == "Enter") await SaveRename(id);
+        else if (e.Key == "Escape") CancelEdit();
+    }
+
+    private async Task DeleteDevice(string id)
+    {
+        var http = await GetHttpAsync();
+        await http.DeleteAsync($"api/devices/{id}");
+        devices.RemoveAll(d => d.Id == id);
+    }
+
+    private async Task<HttpClient> GetHttpAsync()
+    {
+        var http  = ClientFactory.CreateClient("API");
+        var token = await LocalStorage.GetItemAsStringAsync("auth_token");
+        if (!string.IsNullOrEmpty(token))
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return http;
+    }
+
+    class DeviceDto
+    {
+        public string Id { get; set; } = "";          public string DisplayName { get; set; } = "";
+        public string Platform { get; set; } = "";    public string OsVersion { get; set; } = "";
+        public string HardwareId { get; set; } = "";  public string Username { get; set; } = "";
+        public DateTime LastSeen { get; set; }        public bool IsActive { get; set; }
+    }
+}

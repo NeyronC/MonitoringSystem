@@ -1,0 +1,41 @@
+## .NET
+bin/
+obj/
+*.user
+.vs/
+*.suo
+*.swp
+*.sln.docstates
+
+## Rider / JetBrains
+.idea/
+
+## VS Code
+.vscode/
+
+## NuGet
+*.nupkg
+*.snupkg
+**/packages/
+!**/packages/repositories.config
+*.nuget.props
+*.nuget.targets
+
+## MAUI
+**/*.app/
+**/bin/Release/
+**/bin/Debug/
+
+## macOS
+.DS_Store
+
+## Logs
+*.log
+logs/
+
+## MongoDB local data (не зберігаємо дані БД)
+data/
+
+## User-specific appsettings (містять секрети)
+**/appsettings.Production.json
+**/appsettings.Local.json

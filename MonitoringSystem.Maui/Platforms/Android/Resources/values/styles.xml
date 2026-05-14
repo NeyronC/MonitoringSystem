@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- MAUI потребує Theme.MaterialComponents для своїх компонентів (кнопки, поля вводу) -->
+    <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#7F77DD</item>
+        <item name="colorPrimaryVariant">#26215C</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">#7F77DD</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="android:windowBackground">#0a0c14</item>
+        <item name="android:statusBarColor">#111827</item>
+    </style>
+
+    <!-- Splash тема (показується під час завантаження) -->
+    <style name="Maui.SplashTheme" parent="AppTheme"/>
+</resources>
