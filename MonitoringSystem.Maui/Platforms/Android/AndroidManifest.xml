@@ -5,6 +5,7 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:label="Monitoring System Agent">
+
         <activity
             android:name="monitoringsystem.maui.MainActivity"
             android:exported="true"
@@ -15,7 +16,50 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!--
+            VPN сервіс для перехоплення мережевого трафіку.
+            android.permission.BIND_VPN_SERVICE — системний дозвіл який автоматично
+            надається VpnService підкласам. Без нього Android не запустить сервіс.
+
+            exported="false" — сервіс недоступний зовнішнім додаткам (тільки наш код).
+        -->
+        <service
+            android:name="monitoringsystem.maui.MonitoringVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService"/>
+            </intent-filter>
+        </service>
+
     </application>
+
+    <!-- Базові мережеві дозволи -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!--
+        PACKAGE_USAGE_STATS — дозвіл на читання статистики використання додатків.
+        Це "привілейований" дозвіл — не з'являється у звичайному діалозі дозволів.
+        Юзер повинен вручну увімкнути в: Налаштування → Конфіденційність →
+        Додатки з доступом до даних про використання.
+    -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions"
+        xmlns:tools="http://schemas.android.com/tools"/>
+
+    <!--
+        FOREGROUND_SERVICE — дозвіл на запуск сервісу на передньому плані.
+        Потрібен щоб Android не вбив VPN сервіс коли додаток згорнутий.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+
+    <!--
+        POST_NOTIFICATIONS — дозвіл на показ сповіщень.
+        Обов'язковий з Android 13 (API 33). На старіших версіях ігнорується.
+        При першому запуску Android автоматично запитає юзера чи дозволити сповіщення.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
 </manifest>

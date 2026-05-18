@@ -161,6 +161,64 @@ public class AgentViewModel : BaseViewModel
                 NextCycleText = $"Наступний збір через {_secondsToNext} с");
         }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
 
+        // ── Android: налаштовуємо VPN моніторинг трафіку ─────────────────
+        // Підписуємось на callbacks від VPN сервісу.
+        // Коли VPN перехоплює IP пакет — він викликає ці дії.
+        // Ми зберігаємо IP в _androidDetectedIPs для обробки в наступному циклі.
+#if ANDROID
+        MonitoringSystem.Maui.Platforms.Android.Services.MonitoringVpnService.OnIpDetected = ip =>
+        {
+            lock (_androidDetectedIPs)
+                if (!_androidDetectedIPs.Contains(ip))
+                    _androidDetectedIPs.Add(ip);
+        };
+
+        MonitoringSystem.Maui.Platforms.Android.Services.MonitoringVpnService.OnDomainDetected = domain =>
+        {
+            // Домен розрезолвлений з IP — логуємо як WebNavigation
+            MainThread.BeginInvokeOnMainThread(() =>
+                AddEvent("🌐", $"Домен: {domain}"));
+            _ = _api.LogActivityAsync("WebNavigation", $"Домен: {domain}", $"https://{domain}");
+        };
+
+        // Перевіряємо дозвіл на UsageStats (статистика додатків)
+        if (!MonitoringSystem.Maui.Platforms.Android.Services
+            .UsageStatsHelper.HasUsagePermission(Android.App.Application.Context))
+        {
+            // Якщо дозволу немає — показуємо банер і відкриваємо налаштування
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                BannerColor = "#1e3a5f";
+                BannerTitle = "📊 Потрібен дозвіл";
+                BannerDetail = "Дозволь доступ до статистики додатків у налаштуваннях";
+                ShowViolationBanner = true;
+            });
+            // Відкриваємо системний екран налаштувань через 1 секунду
+            await Task.Delay(1000);
+            MonitoringSystem.Maui.Platforms.Android.Services
+                .UsageStatsHelper.OpenUsagePermissionSettings(Android.App.Application.Context);
+        }
+
+        // Запускаємо VPN сервіс через MainActivity.
+        // MainActivity.RequestVpnPermission показує системний діалог якщо потрібно.
+        // Коли юзер дасть дозвіл — OnVpnPermissionGranted викличе StartVpnService.
+
+        // Підписуємось на callback від MainActivity
+        MonitoringSystem.Maui.MainActivity.OnVpnPermissionGranted = StartVpnService;
+
+        // Запитуємо дозвіл (або запускаємо одразу якщо дозвіл вже є)
+        var activity = Microsoft.Maui.ApplicationModel.Platform.CurrentActivity;
+        if (activity != null)
+        {
+            MonitoringSystem.Maui.MainActivity.RequestVpnPermission(activity);
+        }
+        else
+        {
+            // Activity недоступна — спробуємо запустити без діалогу
+            StartVpnService();
+        }
+#endif
+
         // Фоновий цикл збору даних
         _cts = new CancellationTokenSource();
         _ = Task.Run(() => MonitoringLoopAsync(_cts.Token));
@@ -225,6 +283,15 @@ public class AgentViewModel : BaseViewModel
                 {
                     // Кожен цикл (30с) — нове порушення поки процес запущений
                     AddEvent("⚙️", $"Заблокований процес: {blocked}");
+
+                    // Android: показуємо системне сповіщення в шторці.
+                    // Це працює навіть якщо додаток згорнутий або екран заблокований.
+#if ANDROID
+                    MonitoringSystem.Maui.Platforms.Android.Services
+                        .NotificationHelper.ShowBlockedAppNotification(
+                            Android.App.Application.Context, blocked);
+#endif
+
                     var r = await _api.LogActivityAsync("ProcessStarted",
                         $"Виявлено заблокований процес: {blocked}");
                     LogsSentCount++;
@@ -238,6 +305,63 @@ public class AgentViewModel : BaseViewModel
 
     private async Task CollectNetworkAsync()
     {
+#if ANDROID
+        // ── Android: збираємо IP адреси що були перехоплені VPN сервісом ──
+        //
+        // На Android IPGlobalProperties.GetActiveTcpConnections() не підтримується
+        // (кидає NotSupportedException). Замість цього ми використовуємо MonitoringVpnService:
+        // VPN сервіс перехоплює всі IP пакети і через статичний Action повідомляє нас.
+        //
+        // _androidDetectedIPs — список IP що зібрав VPN сервіс між циклами.
+        // Ми беремо їх тут і очищуємо список для наступного циклу.
+
+        List<string> androidConns;
+        lock (_androidDetectedIPs)
+        {
+            androidConns = new List<string>(_androidDetectedIPs);
+            _androidDetectedIPs.Clear();
+        }
+
+        // Додаємо також додатки з UsageStats (які додатки були активні)
+        var recentApps = MonitoringSystem.Maui.Platforms.Android.Services
+            .UsageStatsHelper.GetRecentApps(
+                Android.App.Application.Context,
+                seconds: 60); // додатки за останню хвилину
+
+        // Оновлюємо UI список активних з'єднань
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            ActiveConnections.Clear();
+            foreach (var ip in androidConns) ActiveConnections.Add(ip);
+        });
+
+        // Логуємо нові IP на сервер
+        var newConns = androidConns.Except(_seenConnections).Take(5).ToList();
+        foreach (var ip in newConns) _seenConnections.Add(ip);
+
+        foreach (var ip in newConns)
+        {
+            AddEvent("🌐", $"З'єднання: {ip}");
+            var r = await _api.LogActivityAsync("NetworkConnection", $"IP: {ip}");
+            LogsSentCount++;
+            if (r.IsBlocked) await ShowViolationAsync("З'єднання заблоковано", ip, r.Message);
+        }
+
+        // Логуємо активні додатки (UsageStats API)
+        foreach (var app in recentApps.Except(_seenProcesses).Take(3))
+        {
+            _seenProcesses.Add(app);
+            AddEvent("📱", $"Додаток: {app}");
+            var r = await _api.LogActivityAsync("AppUsage", $"Активний додаток: {app}");
+            LogsSentCount++;
+            if (r.IsBlocked) await ShowViolationAsync("Додаток заблоковано", app, r.Message);
+        }
+#else
+        // ── Windows / Linux: стандартний збір TCP з'єднань ─────────────────
+        //
+        // IPGlobalProperties.GetIPGlobalProperties() — клас з System.Net.NetworkInformation.
+        // GetActiveTcpConnections() — повертає всі активні TCP з'єднання ОС.
+        // Це ті самі дані що показує netstat -ano в командному рядку.
         try
         {
             var conns = IPGlobalProperties.GetIPGlobalProperties()
@@ -248,7 +372,6 @@ public class AgentViewModel : BaseViewModel
                 .Select(c => c.RemoteEndPoint.Address.ToString())
                 .Distinct().ToList();
 
-            // Оновлюємо публічну колекцію з'єднань для UI
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 ActiveConnections.Clear();
@@ -267,7 +390,12 @@ public class AgentViewModel : BaseViewModel
             }
         }
         catch { }
+#endif
     }
+
+    // Список IP адрес що зібрав VPN сервіс (тільки Android).
+    // lock(_androidDetectedIPs) — захист від гонки між VPN потоком і циклом моніторингу.
+    private readonly List<string> _androidDetectedIPs = new();
 
     /// <summary>
     /// Отримує URL з Chrome History за останні N секунд.
@@ -357,6 +485,16 @@ public class AgentViewModel : BaseViewModel
             if (r.IsBlocked)
             {
                 AddEvent("⚠️", $"Заблокований: {domain}");
+
+                // Android: сповіщення про заблокований сайт
+#if ANDROID
+                MonitoringSystem.Maui.Platforms.Android.Services
+                    .NotificationHelper.ShowViolationNotification(
+                        Android.App.Application.Context,
+                        title: "🌐 Заблокований сайт",
+                        message: $"Спроба відкрити заборонений сайт:\n{domain}");
+#endif
+
                 await ShowViolationAsync("Заблокований сайт відкрито",
                     domain, r.Message, "Warning");
             }
@@ -440,6 +578,30 @@ public class AgentViewModel : BaseViewModel
 
     // ── SignalR ───────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Запускає VPN сервіс після отримання дозволу.
+    /// Викликається або одразу (якщо дозвіл вже є) або після діалогу.
+    /// </summary>
+    private void StartVpnService()
+    {
+#if ANDROID
+        try
+        {
+            var serviceIntent = new Android.Content.Intent(
+                Android.App.Application.Context,
+                typeof(MonitoringSystem.Maui.Platforms.Android.Services.MonitoringVpnService));
+            serviceIntent.SetAction("START");
+            Android.App.Application.Context.StartService(serviceIntent);
+            MainThread.BeginInvokeOnMainThread(() =>
+                AddEvent("🔒", "VPN моніторинг трафіку запущено"));
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[VPN] Start error: {ex.Message}");
+        }
+#endif
+    }
+
     private static string GetApiUrl()
     {
         // Той самий пріоритет що і ApiService — custom > env > appsettings > дефолт
@@ -512,6 +674,15 @@ public class AgentViewModel : BaseViewModel
                     HasAdminMessage       = true;
                     AddEvent("📢", title);
                 });
+
+                // Android: показуємо системне сповіщення від адміна.
+                // Це критично — якщо додаток згорнутий, юзер все одно побачить
+                // сповіщення в шторці і зможе відреагувати.
+#if ANDROID
+                MonitoringSystem.Maui.Platforms.Android.Services
+                    .NotificationHelper.ShowAdminAlert(
+                        Android.App.Application.Context, title, msg);
+#endif
 
                 // Показуємо банер адміна + розгортаємо вікно
                 await MainThread.InvokeOnMainThreadAsync(() =>

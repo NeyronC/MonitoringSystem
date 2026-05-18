@@ -55,17 +55,39 @@ else
     {
         if (!firstRender || _ready) return;
 
+        // Невелика затримка — дає браузеру час ініціалізувати LocalStorage.
+        // Без цього Blazored.LocalStorage може кинути виняток на першому рендері
+        // що призводить до disconnect і нескінченного циклу /login → / → /login.
+        await Task.Delay(50);
+
         try
         {
-            var token = await LocalStorage.GetItemAsStringAsync("auth_token");
-            var path  = new Uri(Nav.Uri).AbsolutePath;
+            var currentPath = new Uri(Nav.Uri).AbsolutePath;
+
+            // Сторінка логіну — нічого не перевіряємо, просто показуємо форму
+            if (currentPath.StartsWith("/login"))
+            {
+                _ready = true;
+                StateHasChanged();
+                return;
+            }
+
+            string? token = null;
+            try
+            {
+                token = await LocalStorage.GetItemAsStringAsync("auth_token");
+            }
+            catch
+            {
+                // LocalStorage недоступний (перший рендер, SSR) — чекаємо наступний
+                return;
+            }
 
             // Не авторизований — на логін
             if (string.IsNullOrEmpty(token))
             {
-                if (!path.StartsWith("/login"))
-                    Nav.NavigateTo("/login", forceLoad: false);
                 _ready = true;
+                Nav.NavigateTo("/login", forceLoad: false);
                 StateHasChanged();
                 return;
             }
@@ -80,7 +102,7 @@ else
             {
                 var adminPaths = new[] { "/", "/stats", "/users", "/devices",
                                          "/rules", "/violations", "/logs" };
-                if (adminPaths.Any(p => path == p || path.StartsWith(p + "/")))
+                if (adminPaths.Any(p => currentPath == p || currentPath.StartsWith(p + "/")))
                 {
                     Nav.NavigateTo("/profile", forceLoad: false);
                     StateHasChanged();
@@ -96,7 +118,7 @@ else
         }
         catch (Exception)
         {
-            // Інші JS помилки при відключенні — ігноруємо
+            // Інші JS помилки — ігноруємо
         }
     }
 
